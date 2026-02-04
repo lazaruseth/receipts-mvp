@@ -38,10 +38,10 @@ const RISK_FLAG_INFO: Record<string, { label: string; description: string; sever
 };
 
 const EXAMPLE_URLS = [
-  { name: 'Airline Terms', url: 'united.com/terms' },
-  { name: 'Hotel Booking', url: 'marriott.com/terms' },
-  { name: 'SaaS Agreement', url: 'adobe.com/terms' },
-  { name: 'Cloud Services', url: 'aws.amazon.com/terms' },
+  { name: 'Google ToS', url: 'https://policies.google.com/terms' },
+  { name: 'OpenAI Terms', url: 'https://openai.com/policies/terms-of-use' },
+  { name: 'AWS Terms', url: 'https://aws.amazon.com/service-terms/' },
+  { name: 'Stripe Terms', url: 'https://stripe.com/legal/ssa' },
 ];
 
 export default function PlaygroundPage() {
@@ -107,9 +107,9 @@ export default function PlaygroundPage() {
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
             <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-sm">R</span>
+              <span className="text-white text-lg">🧾</span>
             </div>
-            <span className="font-semibold text-gray-900">REMASTER</span>
+            <span className="font-semibold text-gray-900">RECEIPTS</span>
           </Link>
           <Link
             href="/dashboard"

@@ -226,9 +226,10 @@ async function handleAuth(request: NextRequest, pathname: string): Promise<NextR
       return addSecurityHeaders(NextResponse.next());
     }
 
-    // Development mode - allow through to route handler (which will use demo user)
-    if (process.env.NODE_ENV === 'development') {
-      console.warn(`[Middleware] Dev mode: allowing unauthenticated request to ${pathname}`);
+    // Development auth bypass - ONLY enable in local development via explicit env var
+    // SECURITY: Never set ENABLE_DEV_AUTH_BYPASS=true in production or demo environments
+    if (process.env.ENABLE_DEV_AUTH_BYPASS === 'true') {
+      console.warn(`[Middleware] Dev auth bypass: allowing unauthenticated request to ${pathname}`);
       return addSecurityHeaders(NextResponse.next());
     }
 
@@ -253,9 +254,10 @@ async function handleAuth(request: NextRequest, pathname: string): Promise<NextR
     });
 
     if (!token) {
-      // Development mode - allow through to route handler (which will use demo user)
-      if (process.env.NODE_ENV === 'development' && pathname.startsWith('/api/')) {
-        console.warn(`[Middleware] Dev mode: allowing unauthenticated request to ${pathname}`);
+      // Development auth bypass - ONLY enable in local development via explicit env var
+      // SECURITY: Never set ENABLE_DEV_AUTH_BYPASS=true in production or demo environments
+      if (process.env.ENABLE_DEV_AUTH_BYPASS === 'true' && pathname.startsWith('/api/')) {
+        console.warn(`[Middleware] Dev auth bypass: allowing unauthenticated request to ${pathname}`);
         return addSecurityHeaders(NextResponse.next());
       }
 

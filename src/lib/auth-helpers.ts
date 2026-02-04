@@ -81,9 +81,10 @@ export async function getAuthFromRequest(request: NextRequest): Promise<AuthResu
     }
   }
 
-  // 3. Demo mode fallback (development only)
-  if (process.env.NODE_ENV === 'development') {
-    console.warn('Using demo user for unauthenticated request in development');
+  // 3. Demo mode fallback - ONLY enabled when explicitly set
+  // SECURITY: Set ENABLE_DEV_AUTH_BYPASS=true only in local development
+  if (process.env.ENABLE_DEV_AUTH_BYPASS === 'true') {
+    console.warn('Using demo user for unauthenticated request (dev auth bypass enabled)');
     return {
       authenticated: true,
       userId: DEMO_USER_ID,

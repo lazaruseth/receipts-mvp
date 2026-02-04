@@ -14,7 +14,7 @@ type Provider = {
 
 function SignInContent() {
   const [providers, setProviders] = useState<Record<string, Provider> | null>(null);
-  const [demoEmail, setDemoEmail] = useState('demo@remaster.ai');
+  const [demoEmail, setDemoEmail] = useState('demo@receipts.ai');
   const [loading, setLoading] = useState(false);
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get('callbackUrl') || '/dashboard';
@@ -94,7 +94,7 @@ function SignInContent() {
             type="email"
             value={demoEmail}
             onChange={(e) => setDemoEmail(e.target.value)}
-            placeholder="demo@remaster.ai"
+            placeholder="demo@receipts.ai"
             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
           />
           <button
@@ -118,9 +118,9 @@ export default function SignInPage() {
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2">
             <div className="w-10 h-10 bg-primary-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-xl">R</span>
+              <span className="text-white text-2xl">🧾</span>
             </div>
-            <span className="text-2xl font-bold text-gray-900">REMASTER</span>
+            <span className="text-2xl font-bold text-gray-900">RECEIPTS</span>
           </Link>
           <p className="mt-2 text-gray-600">Sign in to your account</p>
         </div>

@@ -5,8 +5,8 @@ import './globals.css';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'REMASTER - Agreement Rail for Agent Commerce',
-  description: 'See every agreement your AI agents accept on your behalf',
+  title: 'RECEIPTS - Every agreement. Every agent. Every time.',
+  description: 'See every agreement your AI agents accept on your behalf. A Remaster Labs product.',
 };
 
 export default function RootLayout({

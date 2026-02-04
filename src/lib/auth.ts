@@ -69,6 +69,7 @@ export const authOptions: NextAuthOptions = {
       : []),
 
     // Demo credentials provider (for testing without OAuth setup)
+    // SECURITY: Only enabled when ENABLE_DEMO_MODE=true
     CredentialsProvider({
       id: 'demo',
       name: 'Demo Account',
@@ -78,8 +79,9 @@ export const authOptions: NextAuthOptions = {
       async authorize(credentials) {
         if (!credentials?.email) return null;
 
-        // In demo mode, auto-create or find user
-        if (process.env.NODE_ENV === 'development' || credentials.email === 'demo@remaster.ai') {
+        // Demo mode must be explicitly enabled via environment variable
+        // SECURITY: Set ENABLE_DEMO_MODE=false in production to disable demo login
+        if (process.env.ENABLE_DEMO_MODE === 'true') {
           try {
             let user = await prisma.user.findUnique({
               where: { email: credentials.email },

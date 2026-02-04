@@ -8,26 +8,19 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
-              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
-                />
-              </svg>
+              <span className="text-white text-lg">🧾</span>
             </div>
-            <span className="text-xl font-bold text-gray-900">REMASTER</span>
+            <span className="text-xl font-bold text-gray-900">RECEIPTS</span>
           </div>
           <nav className="flex items-center gap-6">
             <Link href="/playground" className="text-sm text-gray-600 hover:text-gray-900">
               Risk Scanner
             </Link>
-            <Link href="/merchants" className="text-sm text-gray-600 hover:text-gray-900">
-              Merchants
+            <Link href="/hall-of-shame" className="text-sm text-gray-600 hover:text-gray-900">
+              Hall of Shame
             </Link>
-            <Link href="/leaderboard" className="text-sm text-gray-600 hover:text-gray-900">
-              Leaderboard
+            <Link href="/pricing" className="text-sm text-gray-600 hover:text-gray-900">
+              Pricing
             </Link>
             <Link href="/dashboard" className="btn-primary">
               Dashboard
@@ -40,7 +33,7 @@ export default function Home() {
       <section className="max-w-7xl mx-auto px-6 py-24 text-center">
         <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary-50 text-primary-700 rounded-full text-sm font-medium mb-8">
           <span className="w-2 h-2 bg-primary-500 rounded-full animate-pulse"></span>
-          The Agreement Rail for Agent Commerce
+          Every agreement. Every agent. Every time.
         </div>
 
         <h1 className="text-5xl font-bold text-gray-900 mb-6 max-w-4xl mx-auto leading-tight">
@@ -49,7 +42,7 @@ export default function Home() {
         </h1>
 
         <p className="text-xl text-gray-600 mb-12 max-w-2xl mx-auto">
-          When AI agents make purchases for you, they click &quot;Accept&quot; on terms you never see. REMASTER captures,
+          When AI agents make purchases for you, they click &quot;Accept&quot; on terms you never see. RECEIPTS captures,
           parses, and stores every agreement—giving you visibility and dispute evidence.
         </p>
 
@@ -147,7 +140,7 @@ export default function Home() {
       {/* How It Works */}
       <section id="how-it-works" className="py-24">
         <div className="max-w-7xl mx-auto px-6">
-          <h2 className="text-3xl font-bold text-center mb-4">How REMASTER Works</h2>
+          <h2 className="text-3xl font-bold text-center mb-4">How RECEIPTS Works</h2>
           <p className="text-gray-600 text-center mb-16 max-w-2xl mx-auto">
             Three simple steps to take back control of your agent agreements
           </p>
@@ -198,7 +191,7 @@ export default function Home() {
             </span>
             <h2 className="text-3xl font-bold mb-4">Features That Make Agents RAVENOUS to Integrate</h2>
             <p className="text-gray-400 max-w-2xl mx-auto">
-              REMASTER isn&apos;t compliance middleware—it&apos;s a career advancement system for agents.
+              RECEIPTS isn&apos;t compliance middleware—it&apos;s a career advancement system for agents.
               Higher trust = more autonomy = bigger deals.
             </p>
           </div>
@@ -237,7 +230,7 @@ export default function Home() {
 
           <div className="mt-12 text-center">
             <p className="text-gray-400 mb-4">
-              Agents without REMASTER are at a competitive disadvantage.
+              Agents without RECEIPTS are at a competitive disadvantage.
             </p>
             <Link
               href="/dashboard/integrate"
@@ -257,7 +250,7 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-6">
           <h2 className="text-3xl font-bold text-center mb-4">Explore the Ecosystem</h2>
           <p className="text-gray-600 text-center mb-12 max-w-2xl mx-auto">
-            REMASTER creates transparency and accountability in AI agent commerce
+            RECEIPTS creates transparency and accountability in AI agent commerce
           </p>
 
           <div className="grid md:grid-cols-3 gap-8">
@@ -319,8 +312,8 @@ export default function Home() {
       {/* Footer */}
       <footer className="border-t border-gray-100 py-8">
         <div className="max-w-7xl mx-auto px-6 text-center text-gray-500 text-sm">
-          <p>REMASTER - The Agreement Rail for Agent Commerce</p>
-          <p className="mt-2">Demo MVP - Built for investor and partner demonstrations</p>
+          <p>RECEIPTS - Every agreement. Every agent. Every time.</p>
+          <p className="mt-2">A <span className="text-primary-600">Remaster Labs</span> product</p>
         </div>
       </footer>
     </main>

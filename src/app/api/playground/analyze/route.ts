@@ -265,14 +265,14 @@ function generateExtractedTerms(text: string, riskFlags: RiskFlag[]): ExtractedT
   const lowerText = text.toLowerCase();
 
   // Try to detect refund policy
-  let refundType: 'full' | 'partial' | 'conditional' | 'non-refundable' = 'conditional';
+  let refundType: 'refundable' | 'non-refundable' | 'conditional' = 'conditional';
   let refundWindow = '30 days';
 
   if (lowerText.includes('non-refundable') || lowerText.includes('no refund')) {
     refundType = 'non-refundable';
     refundWindow = 'N/A';
   } else if (lowerText.includes('full refund')) {
-    refundType = 'full';
+    refundType = 'refundable';
   }
 
   // Detect refund window
@@ -379,9 +379,15 @@ export async function POST(request: NextRequest) {
     let sourceUrl: string | undefined;
 
     if (type === 'url') {
+      // Normalize and validate URL - add https:// if no protocol provided
+      let normalizedUrl = input.trim();
+      if (!normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://')) {
+        normalizedUrl = 'https://' + normalizedUrl;
+      }
+
       // Validate URL
       try {
-        new URL(input);
+        new URL(normalizedUrl);
       } catch {
         return NextResponse.json(
           { success: false, error: 'Invalid URL provided' },
@@ -389,8 +395,8 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      sourceUrl = input;
-      merchantName = extractMerchantFromUrl(input);
+      sourceUrl = normalizedUrl;
+      merchantName = extractMerchantFromUrl(normalizedUrl);
 
       // Check if we have demo data for this merchant
       const demoMatch = DEMO_AGREEMENTS.find(
