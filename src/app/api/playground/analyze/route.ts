@@ -218,7 +218,7 @@ async function fetchUrlContent(url: string): Promise<string> {
     const response = await fetch(url, {
       signal: controller.signal,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; REMASTER-Bot/1.0; +https://remaster.ai)',
+        'User-Agent': 'Mozilla/5.0 (compatible; RECEIPTS-Bot/1.0; +https://receipts.ai)',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       },
     });

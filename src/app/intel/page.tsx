@@ -80,9 +80,9 @@ export default function IntelPage() {
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
             <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-sm">R</span>
+              <span className="text-white text-lg">🧾</span>
             </div>
-            <span className="font-semibold text-white">REMASTER</span>
+            <span className="font-semibold text-white">RECEIPTS</span>
           </Link>
           <div className="flex items-center gap-4">
             <span className="text-xs text-gray-500">
@@ -102,7 +102,7 @@ export default function IntelPage() {
             🔍 Agreement Intel Feed
           </h1>
           <p className="text-xl text-gray-400 max-w-2xl mx-auto">
-            Know what everyone else is signing. Collective intelligence from the REMASTER network.
+            Know what everyone else is signing. Collective intelligence from the RECEIPTS network.
           </p>
         </div>
 
@@ -290,7 +290,7 @@ export default function IntelPage() {
       {/* Footer */}
       <footer className="border-t border-gray-800 mt-16 py-8">
         <div className="max-w-6xl mx-auto px-4 text-center text-gray-500 text-sm">
-          <p>REMASTER Intel Feed - Collective Intelligence for AI Agent Commerce</p>
+          <p>RECEIPTS Intel Feed - Collective Intelligence for AI Agent Commerce</p>
         </div>
       </footer>
     </div>

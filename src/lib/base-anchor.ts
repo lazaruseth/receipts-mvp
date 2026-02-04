@@ -58,7 +58,7 @@ export async function anchorOnBase(
   //
   // const wallet = new ethers.Wallet(process.env.ANCHOR_WALLET_PRIVATE_KEY, provider);
   // const tx = await wallet.sendTransaction({
-  //   to: REMASTER_ANCHOR_CONTRACT,
+  //   to: RECEIPTS_ANCHOR_CONTRACT,
   //   data: encodeAnchorCall(termsHash, captureId, agentId),
   // });
   // await tx.wait();

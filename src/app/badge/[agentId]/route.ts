@@ -70,8 +70,8 @@ function generateBadgeSVG(
   </g>
 
   <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,sans-serif" font-size="11">
-    <text x="${labelWidth / 2}" y="15" fill="#010101" fill-opacity=".3">REMASTER</text>
-    <text x="${labelWidth / 2}" y="14">REMASTER</text>
+    <text x="${labelWidth / 2}" y="15" fill="#010101" fill-opacity=".3">RECEIPTS</text>
+    <text x="${labelWidth / 2}" y="14">RECEIPTS</text>
     <text x="${labelWidth + scoreWidth / 2}" y="15" fill="#010101" fill-opacity=".3">${score}</text>
     <text x="${labelWidth + scoreWidth / 2}" y="14">${score}</text>
   </g>
@@ -99,7 +99,7 @@ function generateBadgeSVG(
   </g>
 
   <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,sans-serif" font-size="10" font-weight="bold" text-transform="uppercase">
-    <text x="${(labelWidth + 10) / 2}" y="16">REMASTER</text>
+    <text x="${(labelWidth + 10) / 2}" y="16">RECEIPTS</text>
     <text x="${labelWidth + 10 + (scoreWidth + 10) / 2}" y="16">${score}</text>
   </g>
 </svg>`.trim();

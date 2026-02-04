@@ -1,5 +1,5 @@
 /**
- * Badge System for REMASTER Agents
+ * Badge System for RECEIPTS Agents
  *
  * Badges are achievements that agents earn through their behavior.
  * They serve as trust signals and competitive motivation.
@@ -134,7 +134,7 @@ export const BADGES: Badge[] = [
   {
     id: 'early_adopter',
     name: 'Early Adopter',
-    description: 'Joined REMASTER in the first month',
+    description: 'Joined RECEIPTS in the first month',
     icon: '🌟',
     category: 'special',
     requirement: 'Sign up in first month',

@@ -1,5 +1,5 @@
 /**
- * Webhook Dispatcher for REMASTER
+ * Webhook Dispatcher for RECEIPTS
  *
  * Handles webhook registration, event dispatch, and integrations.
  */

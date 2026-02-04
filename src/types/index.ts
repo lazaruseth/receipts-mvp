@@ -1,4 +1,4 @@
-// Core Types for REMASTER Agreement Rail
+// Core Types for RECEIPTS Agreement Rail
 
 export interface ExtractedTerms {
   refundPolicy: {

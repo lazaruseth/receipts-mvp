@@ -102,7 +102,7 @@ export async function GET(
 
       // Verification metadata
       verifiedAt: new Date().toISOString(),
-      verifiedBy: 'REMASTER Agreement Rail',
+      verifiedBy: 'RECEIPTS Agreement Rail',
     });
   } catch (error) {
     console.error('Passport verification error:', error);

@@ -142,7 +142,7 @@ export default function WebhooksPage() {
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-8">
           <h3 className="font-medium text-blue-900 mb-1">Real-Time Event Notifications</h3>
           <p className="text-sm text-blue-700">
-            Webhooks let you receive real-time notifications when events occur in your REMASTER
+            Webhooks let you receive real-time notifications when events occur in your RECEIPTS
             account. Use them to trigger workflows, send alerts, or sync with other systems.
           </p>
         </div>

@@ -158,12 +158,12 @@ export default function IntegratePage() {
     setTimeout(() => setCopiedCode(null), 2000);
   };
 
-  const sdkInstallCode = `npm install @remaster/agreement-guard`;
+  const sdkInstallCode = `npm install @receipts/agreement-guard`;
 
-  const sdkUsageCode = `import { AgreementGuard } from '@remaster/agreement-guard';
+  const sdkUsageCode = `import { AgreementGuard } from '@receipts/agreement-guard';
 
 const guard = new AgreementGuard({
-  apiKey: process.env.REMASTER_API_KEY,
+  apiKey: process.env.RECEIPTS_API_KEY,
   agentId: 'my-agent-001',
   agentType: 'openclaw'  // or 'claude-code', 'langchain', etc.
 });

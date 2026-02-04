@@ -22,7 +22,7 @@ const registerRequestSchema = z.object({
 /**
  * POST /api/agents/register
  *
- * Register a new agent with REMASTER.
+ * Register a new agent with RECEIPTS.
  * This is the first step for any agent to start using Agreement Guard.
  *
  * AUTHENTICATION REQUIRED: API key (Bearer rmsm_xxx) or session
@@ -142,7 +142,7 @@ function generateWelcomeMessage(
   trustScore: number,
   capabilities: ReturnType<typeof getCapabilitiesForScore>
 ): string {
-  return `🎉 Welcome to REMASTER Agreement Guard, ${agentId}!
+  return `🎉 Welcome to RECEIPTS Agreement Guard, ${agentId}!
 
 You're now registered as a ${agentType} agent with a starting trust score of ${trustScore}/100.
 

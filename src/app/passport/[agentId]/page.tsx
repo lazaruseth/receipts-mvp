@@ -13,15 +13,15 @@ export async function generateMetadata({
   const agent = getAgentById(agentId);
 
   if (!agent) {
-    return { title: 'Agent Not Found | REMASTER' };
+    return { title: 'Agent Not Found | RECEIPTS' };
   }
 
   return {
-    title: `${agent.name} Trust Passport | REMASTER`,
+    title: `${agent.name} Trust Passport | RECEIPTS`,
     description: `Verified Trust Score: ${agent.trustScore}/100. ${agent.tierName} Tier. ${agent.totalAgreements} agreements, ${agent.badges.length} badges.`,
     openGraph: {
       title: `${agent.name} - Trust Passport`,
-      description: `Verified REMASTER Agent • Trust Score: ${agent.trustScore}`,
+      description: `Verified RECEIPTS Agent • Trust Score: ${agent.trustScore}`,
       type: 'profile',
     },
   };
@@ -68,9 +68,9 @@ export default async function PassportPage({
         <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
             <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-sm">R</span>
+              <span className="text-white text-lg">🧾</span>
             </div>
-            <span className="font-semibold text-white">REMASTER</span>
+            <span className="font-semibold text-white">RECEIPTS</span>
           </Link>
           <div className="flex gap-4">
             <Link href="/leaderboard" className="text-sm text-gray-400 hover:text-white">
@@ -98,10 +98,10 @@ export default async function PassportPage({
               <div className="flex items-start justify-between mb-8">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 bg-primary-600 rounded-xl flex items-center justify-center">
-                    <span className="text-white font-bold text-xl">R</span>
+                    <span className="text-white text-2xl">🧾</span>
                   </div>
                   <div>
-                    <p className="text-xs text-gray-500 uppercase tracking-widest">REMASTER</p>
+                    <p className="text-xs text-gray-500 uppercase tracking-widest">RECEIPTS</p>
                     <p className="text-white font-semibold">Agent Trust Passport</p>
                   </div>
                 </div>
@@ -278,7 +278,7 @@ export default async function PassportPage({
       {/* Footer */}
       <footer className="border-t border-gray-800 mt-16 py-8">
         <div className="max-w-4xl mx-auto px-4 text-center text-gray-500 text-sm">
-          <p>REMASTER Agent Trust Passport - Verified Credentials for AI Agent Commerce</p>
+          <p>RECEIPTS Agent Trust Passport - Verified Credentials for AI Agent Commerce</p>
         </div>
       </footer>
     </div>

@@ -18,11 +18,11 @@ export async function generateMetadata({
   const agent = getAgentById(agentId);
 
   if (!agent) {
-    return { title: 'Agent Not Found | REMASTER' };
+    return { title: 'Agent Not Found | RECEIPTS' };
   }
 
   return {
-    title: `${agent.name} - Trust Score ${agent.trustScore} | REMASTER`,
+    title: `${agent.name} - Trust Score ${agent.trustScore} | RECEIPTS`,
     description: `${agent.description}. ${agent.totalAgreements} agreements captured, ${agent.badges.length} badges earned.`,
     openGraph: {
       title: `${agent.name} - Trust Score ${agent.trustScore}`,
@@ -68,9 +68,9 @@ export default async function AgentProfilePage({
         <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
             <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-sm">R</span>
+              <span className="text-white text-lg">🧾</span>
             </div>
-            <span className="font-semibold text-gray-900">REMASTER</span>
+            <span className="font-semibold text-gray-900">RECEIPTS</span>
           </Link>
           <Link
             href="/leaderboard"
@@ -273,7 +273,7 @@ export default async function AgentProfilePage({
           {/* Markdown Code */}
           <div className="bg-gray-900 rounded-lg p-4 overflow-x-auto">
             <code className="text-green-400 text-sm">
-              {`[![REMASTER Trust Score](${badgeUrl}?style=flat)](https://remaster.ai/agent/${agentId})`}
+              {`[![RECEIPTS Trust Score](${badgeUrl}?style=flat)](https://receipts.ai/agent/${agentId})`}
             </code>
           </div>
         </div>
@@ -282,7 +282,7 @@ export default async function AgentProfilePage({
         <div className="bg-gradient-to-r from-primary-600 to-primary-700 rounded-xl p-8 text-center text-white">
           <h3 className="text-2xl font-bold mb-2">Want Your Agent on the Leaderboard?</h3>
           <p className="text-primary-100 mb-6 max-w-lg mx-auto">
-            Integrate REMASTER to capture agreements, build trust, and earn badges.
+            Integrate RECEIPTS to capture agreements, build trust, and earn badges.
           </p>
           <div className="flex justify-center gap-4">
             <Link
@@ -304,7 +304,7 @@ export default async function AgentProfilePage({
       {/* Footer */}
       <footer className="border-t border-gray-200 mt-16 py-8">
         <div className="max-w-4xl mx-auto px-4 text-center text-gray-500 text-sm">
-          <p>REMASTER - Agreement Rail for AI Agent Commerce</p>
+          <p>RECEIPTS - Every agreement. Every agent. Every time.</p>
         </div>
       </footer>
     </div>

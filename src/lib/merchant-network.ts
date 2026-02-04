@@ -1,7 +1,7 @@
 /**
  * Merchant Acceptance Network
  *
- * A network of "REMASTER Verified Merchants" who offer preferential
+ * A network of "RECEIPTS Verified Merchants" who offer preferential
  * treatment to high-trust agents:
  * - Skip human approval requirements
  * - Higher transaction limits

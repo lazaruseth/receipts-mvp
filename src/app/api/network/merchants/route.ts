@@ -4,7 +4,7 @@ import { getNetworkMerchants, getNetworkStats } from '@/lib/merchant-network';
 /**
  * GET /api/network/merchants
  *
- * List all merchants in the REMASTER Acceptance Network.
+ * List all merchants in the RECEIPTS Acceptance Network.
  */
 export async function GET(request: NextRequest) {
   try {

@@ -65,9 +65,9 @@ export default function AuthErrorPage() {
         {/* Logo */}
         <Link href="/" className="inline-flex items-center gap-2 mb-8">
           <div className="w-10 h-10 bg-primary-600 rounded-lg flex items-center justify-center">
-            <span className="text-white font-bold text-xl">R</span>
+            <span className="text-white text-lg">🧾</span>
           </div>
-          <span className="text-2xl font-bold text-gray-900">REMASTER</span>
+          <span className="text-2xl font-bold text-gray-900">RECEIPTS</span>
         </Link>
 
         <Suspense fallback={

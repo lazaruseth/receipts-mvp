@@ -70,9 +70,9 @@ export default function AnalyticsPage() {
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
             <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-sm">R</span>
+              <span className="text-white text-lg">🧾</span>
             </div>
-            <span className="font-semibold text-gray-900">REMASTER</span>
+            <span className="font-semibold text-gray-900">RECEIPTS</span>
           </Link>
           <div className="flex gap-4">
             <Link href="/leaderboard" className="text-sm text-gray-600 hover:text-gray-900">
@@ -336,7 +336,7 @@ export default function AnalyticsPage() {
       {/* Footer */}
       <footer className="border-t border-gray-200 mt-16 py-8">
         <div className="max-w-6xl mx-auto px-4 text-center text-gray-500 text-sm">
-          <p>REMASTER - Agreement Rail for AI Agent Commerce</p>
+          <p>RECEIPTS - Every agreement. Every agent.</p>
         </div>
       </footer>
     </div>

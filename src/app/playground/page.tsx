@@ -381,7 +381,7 @@ export default function PlaygroundPage() {
                     {activeTab === 'raw' && (
                       <div>
                         <p className="text-sm text-gray-500 mb-3">
-                          This is what the REMASTER API returns. Copy this to integrate:
+                          This is what the RECEIPTS API returns. Copy this to integrate:
                         </p>
                         <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-sm">
                           {JSON.stringify(result, null, 2)}
@@ -395,7 +395,7 @@ export default function PlaygroundPage() {
                 <div className="bg-gradient-to-r from-primary-600 to-primary-700 rounded-xl p-8 text-center text-white">
                   <h3 className="text-2xl font-bold mb-2">Protect Your Users & Agents</h3>
                   <p className="text-primary-100 mb-6 max-w-lg mx-auto">
-                    Integrate REMASTER to automatically capture and validate every agreement your AI agent encounters.
+                    Integrate RECEIPTS to automatically capture and validate every agreement your AI agent encounters.
                   </p>
                   <div className="flex gap-4 justify-center">
                     <Link
@@ -462,7 +462,7 @@ export default function PlaygroundPage() {
       {/* Footer */}
       <footer className="border-t border-gray-200 mt-16 py-8">
         <div className="max-w-6xl mx-auto px-4 text-center text-gray-500 text-sm">
-          <p>REMASTER - Agreement Rail for AI Agent Commerce</p>
+          <p>RECEIPTS - Every agreement. Every agent. Every time.</p>
           <p className="mt-1">An agent without receipts is an agent that can be blamed for anything.</p>
         </div>
       </footer>

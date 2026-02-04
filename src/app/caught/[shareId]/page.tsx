@@ -138,7 +138,7 @@ export async function generateMetadata({
 
   if (!share) {
     return {
-      title: 'Share Not Found | REMASTER',
+      title: 'Share Not Found | RECEIPTS',
     };
   }
 
@@ -147,7 +147,7 @@ export async function generateMetadata({
   const description = `"${share.clauseExcerpt.slice(0, 150)}..." - ${flagInfo?.label || share.clauseType}`;
 
   return {
-    title: `${title} | REMASTER`,
+    title: `${title} | RECEIPTS`,
     description,
     openGraph: {
       title,
@@ -190,9 +190,9 @@ export default async function CaughtPage({ params }: { params: Promise<{ shareId
         <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
             <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-sm">R</span>
+              <span className="text-white text-lg">🧾</span>
             </div>
-            <span className="font-semibold text-gray-900">REMASTER</span>
+            <span className="font-semibold text-gray-900">RECEIPTS</span>
           </Link>
           <Link
             href="/playground"
@@ -306,7 +306,7 @@ export default async function CaughtPage({ params }: { params: Promise<{ shareId
       {/* Footer */}
       <footer className="border-t border-gray-200 mt-16 py-8">
         <div className="max-w-4xl mx-auto px-4 text-center text-gray-500 text-sm">
-          <p>REMASTER - Agreement Rail for AI Agent Commerce</p>
+          <p>RECEIPTS - Every agreement. Every agent. Every time.</p>
           <p className="mt-1">
             An agent without receipts is an agent that can be blamed for anything.
           </p>

@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
 
     if (!passport) {
       return NextResponse.json(
-        { error: 'Agent not found in REMASTER registry' },
+        { error: 'Agent not found in RECEIPTS registry' },
         { status: 404 }
       );
     }
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
       expiresIn: '24 hours',
       usage: {
         description: 'Present this passport to merchants for verification',
-        header: 'X-REMASTER-Passport: <token>',
+        header: 'X-RECEIPTS-Passport: <token>',
         apiVerify: `GET /api/passport/verify/${token}`,
       },
     });

@@ -1,7 +1,7 @@
 /**
  * Real-Time Agreement Intel Engine
  *
- * Provides collective intelligence across the REMASTER network:
+ * Provides collective intelligence across the RECEIPTS network:
  * - ToS changes detected
  * - Risk flag spikes
  * - Dispute clusters

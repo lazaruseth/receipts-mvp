@@ -5,7 +5,7 @@
  * Like a credit score for AI agents.
  *
  * Once merchants start REQUIRING ATP for transactions,
- * agents without REMASTER are locked out.
+ * agents without RECEIPTS are locked out.
  */
 
 import crypto from 'crypto';
@@ -41,7 +41,7 @@ export interface AgentTrustPassport {
   agentId: string;
   agentName: string;
 
-  // Trust metrics (attested by REMASTER)
+  // Trust metrics (attested by RECEIPTS)
   trustScore: number;
   tier: number;
   tierName: string;
@@ -166,7 +166,7 @@ export function verifyPassport(passport: AgentTrustPassport): PassportVerificati
         valid: false,
         expired: false,
         tampered: false,
-        error: 'Agent not found in REMASTER registry',
+        error: 'Agent not found in RECEIPTS registry',
       };
     }
 
