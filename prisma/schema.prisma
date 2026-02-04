@@ -1,0 +1,526 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// NextAuth.js Models
+// ============================================
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ============================================
+// API Key Model (for agent-to-API auth)
+// ============================================
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  userId      String
+  name        String    @default("Default API Key")
+  keyHash     String    @unique  // SHA-256 hash of the key (we never store raw)
+  keyPrefix   String              // First 8 chars for identification (rmsm_xxx...)
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+
+  // Permissions/scopes
+  scopes      String[]  @default(["read", "write"])
+
+  createdAt   DateTime  @default(now())
+  revokedAt   DateTime?
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([keyHash])
+}
+
+// ============================================
+// User Model
+// ============================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  name          String?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Billing
+  stripeCustomerId    String?   @unique
+  subscriptionTier    SubscriptionTier @default(free)
+  subscriptionStatus  String?
+
+  // Usage tracking (denormalized for quick checks)
+  apiCallsThisMonth   Int       @default(0)
+  capturesThisMonth   Int       @default(0)
+  usageResetAt        DateTime  @default(now())
+
+  // Relations
+  accounts    Account[]
+  sessions    Session[]
+  apiKeys     ApiKey[]
+  agreements  Agreement[]
+  disputes    Dispute[]
+  chatHistory ChatHistory[]
+  policies    Policy[]
+  agents      Agent[]       // Agents owned by this user
+  webhooks    Webhook[]
+}
+
+// ============================================
+// Agent Model (NEW)
+// ============================================
+
+model Agent {
+  id          String    @id @default(cuid())
+  externalId  String    @unique // Agent's self-reported ID
+  agentType   AgentType
+  publicKey   String?   // For future cryptographic signing
+  ownerId     String?   // User who owns this agent
+
+  // Trust system
+  trustScore   Int      @default(10)
+  capabilities Json     // Current capability unlocks
+
+  // Stats (denormalized for performance)
+  totalAgreements    Int @default(0)
+  compliantAgreements Int @default(0)
+  disputesWon        Int @default(0)
+  disputesLost       Int @default(0)
+
+  // Metadata
+  name        String?
+  version     String?
+  metadata    Json?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  lastActiveAt DateTime @default(now())
+
+  // Relations
+  owner       User?        @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  agreements  Agreement[]
+  trustEvents TrustEvent[]
+  captures    Capture[]
+  stakes      Stake[]
+
+  @@index([ownerId])
+  @@index([agentType])
+  @@index([trustScore])
+}
+
+// ============================================
+// Policy Model (NEW) - Agency Budget
+// ============================================
+
+model Policy {
+  id     String @id @default(cuid())
+  userId String
+  name   String @default("Default Policy")
+
+  // Forbidden clauses - agreements with these are blocked
+  forbiddenClauses String[] // BINDING_ARBITRATION, CHARGEBACK_WAIVER, etc.
+
+  // Spending limits
+  maxSpendPerTx    Float @default(100)
+  maxSpendPerDay   Float?
+  maxSpendPerMonth Float?
+
+  // Remedy requirements
+  minRefundWindowHours   Int?
+  requireChargebackRights Boolean @default(true)
+
+  // Category restrictions
+  allowedCategories String[]
+  blockedCategories String[]
+
+  // Counterparty restrictions
+  allowedMerchants String[]
+  blockedMerchants String[]
+
+  // Escalation rules
+  requireApprovalAbove Float?
+  requireApprovalFor   String[] // Categories requiring approval
+
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ============================================
+// Trust Event Model (NEW)
+// ============================================
+
+model TrustEvent {
+  id        String         @id @default(cuid())
+  agentId   String
+  eventType TrustEventType
+  delta     Float          // Score change (+ or -)
+  reason    String
+
+  // Related entities
+  relatedAgreementId String?
+  relatedDisputeId   String?
+  relatedCaptureId   String?
+
+  createdAt DateTime @default(now())
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([eventType])
+  @@index([createdAt])
+}
+
+// ============================================
+// Capture Model (NEW) - Pre-acceptance snapshots
+// ============================================
+
+model Capture {
+  id           String @id @default(cuid())
+  agentId      String
+  documentHash String // SHA-256 of raw content
+
+  // Source info
+  sourceUrl      String
+  merchantDomain String?
+  merchantName   String?
+
+  // Raw content (stored or referenced)
+  rawText     String? @db.Text
+  contentRef  String? // IPFS or S3 reference for large docs
+
+  // Processing status
+  status      CaptureStatus @default(captured)
+  parsedAt    DateTime?
+  anchoredAt  DateTime?
+
+  // Linked PAO (after parsing)
+  termsHash   String?
+  paoData     Json?
+
+  // Blockchain anchor
+  blockchainTxId String?
+  blockchainChain String?
+
+  createdAt DateTime @default(now())
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([documentHash])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ============================================
+// Agreement Model (Enhanced)
+// ============================================
+
+model Agreement {
+  id               String   @id @default(cuid())
+  userId           String
+  agentId          String?
+  merchantId       String
+  merchantName     String
+  merchantCategory String
+
+  // Capture data
+  sourceUrl      String
+  documentHash   String
+  blockchainTxId String?
+  capturedAt     DateTime @default(now())
+
+  // Raw content
+  rawText       String @db.Text
+  documentTitle String
+
+  // Parsed data (stored as JSON)
+  extractedTerms Json
+  riskFlags      String[] // Array of risk flag strings
+  plainSummary   String   @db.Text
+
+  // PAO data (NEW)
+  termsHash String?
+  paoData   Json?
+
+  // Status
+  status    AgreementStatus @default(active)
+  expiresAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agent    Agent?    @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  disputes Dispute[]
+
+  @@index([userId])
+  @@index([agentId])
+  @@index([merchantName])
+  @@index([status])
+  @@index([capturedAt])
+  @@index([termsHash])
+}
+
+// ============================================
+// Dispute Model
+// ============================================
+
+model Dispute {
+  id          String @id @default(cuid())
+  agreementId String
+  userId      String
+
+  issueType   DisputeIssueType
+  description String           @db.Text
+
+  // Evidence package (stored as JSON)
+  evidencePackage Json?
+
+  status      DisputeStatus @default(draft)
+  submittedTo String?
+  resolution  String?       @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  agreement Agreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([agreementId])
+  @@index([status])
+}
+
+// ============================================
+// Chat History Model
+// ============================================
+
+model ChatHistory {
+  id          String @id @default(cuid())
+  userId      String
+  agreementId String?
+
+  messages    Json   // Array of chat messages
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([agreementId])
+}
+
+// ============================================
+// Enums
+// ============================================
+
+enum AgreementStatus {
+  active
+  expired
+  disputed
+}
+
+enum DisputeIssueType {
+  cancelled
+  not_delivered
+  different_than_agreed
+  unauthorized
+  other
+}
+
+enum DisputeStatus {
+  draft
+  submitted
+  in_review
+  resolved
+  rejected
+}
+
+enum AgentType {
+  openclaw
+  claude_code
+  langchain
+  openai_assistants
+  autogpt
+  custom
+}
+
+enum TrustEventType {
+  agreement_captured
+  agreement_compliant
+  agreement_risky_accepted
+  dispute_won
+  dispute_lost
+  policy_violation
+  daily_activity
+}
+
+enum CaptureStatus {
+  captured
+  parsing
+  parsed
+  anchoring
+  anchored
+  failed
+}
+
+enum SubscriptionTier {
+  free
+  pro
+  scale
+  enterprise
+}
+
+// ============================================
+// Stake Model (Trust Score Staking)
+// ============================================
+
+model Stake {
+  id              String      @id @default(cuid())
+  agentId         String
+
+  // Transaction details
+  requestedLimit  Float       // The transaction limit requested
+  currentLimit    Float       // Agent's normal limit at time of stake
+  category        String      // Transaction category
+  captureId       String?     // Related capture if any
+
+  // Stake amounts
+  stakedAmount    Int         // Trust points locked
+  potentialGain   Int         // Points to gain if successful
+  potentialLoss   Int         // Points to lose if dispute lost
+  riskMultiplier  Float       // Risk calculation factor
+
+  // Status tracking
+  status          StakeStatus @default(active)
+  lockedAt        DateTime    @default(now())
+  expiresAt       DateTime    // 7 days from lock
+  resolvedAt      DateTime?
+
+  // Outcome (filled when resolved)
+  outcome         StakeOutcome?
+  scoreChange     Int?        // Actual score change
+  bonusEarned     Int?        // Any bonus points
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  agent           Agent       @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+enum StakeStatus {
+  active
+  resolved
+  expired
+}
+
+enum StakeOutcome {
+  success
+  dispute_won
+  dispute_lost
+}
+
+// ============================================
+// Webhook Model
+// ============================================
+
+model Webhook {
+  id          String   @id @default(cuid())
+  userId      String
+
+  url         String   // Endpoint URL
+  events      String[] // Event types to receive
+  secret      String   // Signing secret (hashed)
+
+  // Status
+  active      Boolean  @default(true)
+
+  // Delivery tracking
+  lastDeliveryAt    DateTime?
+  lastDeliveryStatus String?
+  failureCount      Int       @default(0)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries  WebhookDelivery[]
+
+  @@index([userId])
+  @@index([active])
+}
+
+model WebhookDelivery {
+  id          String   @id @default(cuid())
+  webhookId   String
+
+  eventType   String
+  payload     Json
+  status      String   // 'pending' | 'success' | 'failed'
+  statusCode  Int?
+  response    String?  @db.Text
+  attempts    Int      @default(1)
+  error       String?
+
+  createdAt   DateTime @default(now())
+  deliveredAt DateTime?
+
+  webhook     Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId])
+  @@index([status])
+  @@index([createdAt])
+}
