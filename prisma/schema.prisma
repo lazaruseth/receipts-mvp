@@ -524,3 +524,26 @@ model WebhookDelivery {
   @@index([status])
   @@index([createdAt])
 }
+
+// ============================================
+// ToS Subscription Model (Email Alerts)
+// ============================================
+
+model TosSubscription {
+  id           String   @id @default(cuid())
+  email        String
+  tosUrl       String   // URL of the ToS being watched
+  merchantName String?  // Name of the company if known
+
+  // Status
+  active       Boolean  @default(true)
+  lastNotified DateTime?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([email, tosUrl])
+  @@index([email])
+  @@index([tosUrl])
+  @@index([active])
+}

@@ -103,7 +103,9 @@ export default function DisputesPage() {
                   </div>
                   <div className="flex gap-2 ml-4">
                     {dispute.status === 'draft' && (
-                      <button className="btn-primary text-sm">Submit Dispute</button>
+                      <Link href={`/dashboard/disputes/${dispute.id}`} className="btn-primary text-sm">
+                        Submit Dispute
+                      </Link>
                     )}
                     <Link
                       href={`/dashboard/agreements/${dispute.agreementId}`}

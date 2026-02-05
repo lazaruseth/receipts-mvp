@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
 interface AnalysisResult {
@@ -44,13 +45,32 @@ const EXAMPLE_URLS = [
   { name: 'Stripe Terms', url: 'https://stripe.com/legal/ssa' },
 ];
 
-export default function PlaygroundPage() {
+function PlaygroundContent() {
+  const searchParams = useSearchParams();
   const [input, setInput] = useState('');
   const [inputType, setInputType] = useState<'url' | 'text'>('url');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [revealedFlags, setRevealedFlags] = useState<number>(0);
   const [activeTab, setActiveTab] = useState<'summary' | 'terms' | 'raw'>('summary');
+  const [autoAnalyzed, setAutoAnalyzed] = useState(false);
+
+  // Auto-fill and analyze if URL param provided
+  useEffect(() => {
+    const urlParam = searchParams.get('url');
+    if (urlParam && !autoAnalyzed) {
+      setInput(urlParam);
+      setAutoAnalyzed(true);
+    }
+  }, [searchParams, autoAnalyzed]);
+
+  // Auto-analyze when input is set from URL param
+  useEffect(() => {
+    if (autoAnalyzed && input && !result && !isAnalyzing) {
+      handleAnalyze();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoAnalyzed, input]);
 
   // Dramatic reveal of risk flags one by one
   useEffect(() => {
@@ -391,6 +411,146 @@ export default function PlaygroundPage() {
                   </div>
                 </div>
 
+                {/* Share This Finding - VIRAL LOOP */}
+                <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+                  <div className="text-center mb-6">
+                    <h3 className="text-xl font-bold text-gray-900 mb-2">🚨 Share This Finding</h3>
+                    <p className="text-gray-600">
+                      Help others know what they&apos;re agreeing to
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-3 justify-center mb-6">
+                    {/* Twitter Share */}
+                    <a
+                      href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(
+                        `🚨 I just scanned ${result.merchantName || 'a company'}'s Terms of Service\n\nRisk Score: ${result.riskScore}/100 (${getRiskScoreLabel(result.riskScore || 0)})\n\nFound ${result.riskFlags?.length || 0} risk flags${result.riskFlags && result.riskFlags.length > 0 ? ` including:\n${result.riskFlags.slice(0, 2).map(f => `⚠️ ${f.label}`).join('\n')}` : ''}\n\nScan any ToS free:`
+                      )}&url=${encodeURIComponent(window.location.href)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 px-5 py-3 bg-black text-white rounded-lg font-semibold hover:bg-gray-800 transition-colors"
+                    >
+                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                      </svg>
+                      Share on X
+                    </a>
+
+                    {/* Copy Link */}
+                    <button
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(window.location.href);
+                        const btn = document.getElementById('copy-link-btn');
+                        if (btn) {
+                          btn.textContent = '✓ Copied!';
+                          setTimeout(() => { btn.textContent = '📋 Copy Link'; }, 2000);
+                        }
+                      }}
+                      id="copy-link-btn"
+                      className="inline-flex items-center gap-2 px-5 py-3 bg-gray-100 text-gray-700 rounded-lg font-semibold hover:bg-gray-200 transition-colors"
+                    >
+                      📋 Copy Link
+                    </button>
+
+                    {/* Native Share (mobile) */}
+                    {typeof navigator !== 'undefined' && navigator.share && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            await navigator.share({
+                              title: `${result.merchantName || 'ToS'} Risk Analysis`,
+                              text: `🚨 ${result.merchantName || 'This company'}'s ToS has ${result.riskFlags?.length || 0} risk flags. Risk score: ${result.riskScore}/100`,
+                              url: window.location.href,
+                            });
+                          } catch {
+                            // User cancelled
+                          }
+                        }}
+                        className="inline-flex items-center gap-2 px-5 py-3 bg-primary-100 text-primary-700 rounded-lg font-semibold hover:bg-primary-200 transition-colors"
+                      >
+                        📤 Share
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Shareable preview text */}
+                  <div className="bg-gray-50 rounded-lg p-4 text-sm text-gray-600 font-mono">
+                    <p className="mb-1">🚨 {result.merchantName || 'Company'}&apos;s Terms of Service</p>
+                    <p className="mb-1">Risk Score: <span className={getRiskScoreColor(result.riskScore || 0)}>{result.riskScore}/100</span></p>
+                    {result.riskFlags && result.riskFlags.length > 0 && (
+                      <p>⚠️ {result.riskFlags[0].label}</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Email Capture - ToS Change Alerts */}
+                <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 bg-yellow-100 rounded-full flex items-center justify-center flex-shrink-0">
+                      <span className="text-2xl">🔔</span>
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="font-bold text-gray-900 mb-1">Get notified when this ToS changes</h3>
+                      <p className="text-sm text-gray-600 mb-4">
+                        Companies update their terms all the time. We&apos;ll alert you when {result.merchantName || 'this company'} makes changes.
+                      </p>
+                      <form
+                        onSubmit={async (e) => {
+                          e.preventDefault();
+                          const form = e.target as HTMLFormElement;
+                          const emailInput = form.elements.namedItem('email') as HTMLInputElement;
+                          const submitBtn = form.elements.namedItem('submit') as HTMLButtonElement;
+
+                          if (!emailInput.value) return;
+
+                          submitBtn.textContent = 'Subscribing...';
+                          submitBtn.disabled = true;
+
+                          try {
+                            const res = await fetch('/api/subscribe', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                email: emailInput.value,
+                                tosUrl: input,
+                                merchantName: result.merchantName,
+                              }),
+                            });
+
+                            if (res.ok) {
+                              submitBtn.textContent = '✓ Subscribed!';
+                              emailInput.value = '';
+                            } else {
+                              submitBtn.textContent = 'Try again';
+                              submitBtn.disabled = false;
+                            }
+                          } catch {
+                            submitBtn.textContent = 'Try again';
+                            submitBtn.disabled = false;
+                          }
+                        }}
+                        className="flex gap-2"
+                      >
+                        <input
+                          type="email"
+                          name="email"
+                          placeholder="you@email.com"
+                          className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                          required
+                        />
+                        <button
+                          type="submit"
+                          name="submit"
+                          className="px-6 py-2 bg-yellow-500 text-white rounded-lg font-semibold hover:bg-yellow-600 transition-colors"
+                        >
+                          Notify Me
+                        </button>
+                      </form>
+                      <p className="text-xs text-gray-500 mt-2">No spam. Only ToS change alerts.</p>
+                    </div>
+                  </div>
+                </div>
+
                 {/* CTA Section */}
                 <div className="bg-gradient-to-r from-primary-600 to-primary-700 rounded-xl p-8 text-center text-white">
                   <h3 className="text-2xl font-bold mb-2">Protect Your Users & Agents</h3>
@@ -404,15 +564,12 @@ export default function PlaygroundPage() {
                     >
                       Get API Access
                     </Link>
-                    <button
-                      onClick={() => {
-                        navigator.clipboard.writeText(window.location.href);
-                        alert('Link copied!');
-                      }}
+                    <Link
+                      href="/hall-of-shame"
                       className="px-6 py-3 bg-primary-500 text-white rounded-lg font-semibold hover:bg-primary-400 transition-colors"
                     >
-                      Share This Analysis
-                    </button>
+                      View Hall of Shame
+                    </Link>
                   </div>
                 </div>
               </div>
@@ -467,5 +624,22 @@ export default function PlaygroundPage() {
         </div>
       </footer>
     </div>
+  );
+}
+
+export default function PlaygroundPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 bg-primary-600 rounded-lg flex items-center justify-center mx-auto mb-4">
+            <span className="text-white text-2xl">🧾</span>
+          </div>
+          <p className="text-gray-600">Loading Risk Scanner...</p>
+        </div>
+      </div>
+    }>
+      <PlaygroundContent />
+    </Suspense>
   );
 }
