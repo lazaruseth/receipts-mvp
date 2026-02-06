@@ -139,7 +139,7 @@ export default function AgreementDetailPage() {
           </div>
         </div>
 
-        {/* Blockchain proof */}
+        {/* Verification Hash */}
         {agreement.blockchainTxId && (
           <div className="mt-4 p-3 bg-primary-50 rounded-lg flex items-center gap-3">
             <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -151,7 +151,7 @@ export default function AgreementDetailPage() {
               />
             </svg>
             <div>
-              <p className="text-sm font-medium text-primary-800">Immutable Timestamp Proof</p>
+              <p className="text-sm font-medium text-primary-800">Verification Hash</p>
               <p className="text-xs text-primary-600 font-mono">{agreement.blockchainTxId}</p>
             </div>
           </div>

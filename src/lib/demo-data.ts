@@ -11,7 +11,7 @@ export const DEMO_AGREEMENTS: Omit<Agreement, 'userId'>[] = [
     category: 'travel',
     sourceUrl: 'https://www.united.com/terms',
     documentHash: 'sha256:abc123...',
-    blockchainTxId: '0x1234567890abcdef',
+    blockchainTxId: 'verify:ua-2024-01-15-abc123',
     capturedAt: new Date('2024-01-15T10:30:00Z'),
     rawText: `UNITED AIRLINES CONTRACT OF CARRIAGE
 Last Updated: January 2024
@@ -99,7 +99,7 @@ United may share your personal information with partner airlines, code-share par
     category: 'hospitality',
     sourceUrl: 'https://www.marriott.com/terms',
     documentHash: 'sha256:def456...',
-    blockchainTxId: '0xabcdef1234567890',
+    blockchainTxId: 'verify:mi-2024-01-20-def456',
     capturedAt: new Date('2024-01-18T14:00:00Z'),
     rawText: `MARRIOTT INTERNATIONAL HOTEL BOOKING TERMS & CONDITIONS
 Effective Date: January 2024
@@ -401,7 +401,7 @@ AWS does not access or use your content except as necessary to provide and maint
     category: 'travel',
     sourceUrl: 'https://www.hertz.com/terms',
     documentHash: 'sha256:mno345...',
-    blockchainTxId: '0x567890abcdef1234',
+    blockchainTxId: 'verify:hz-2024-01-10-ghi789',
     capturedAt: new Date('2024-01-25T11:00:00Z'),
     rawText: `HERTZ VEHICLE RENTAL AGREEMENT
 Terms and Conditions | United States

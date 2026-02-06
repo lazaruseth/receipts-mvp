@@ -36,3 +36,5 @@ next-env.d.ts
 
 # Prisma - keep migrations in git for deployment
 # /prisma/migrations
+packages/agreement-guard-sdk/dist/
+packages/agreement-guard-sdk/node_modules/

@@ -34,10 +34,7 @@ export default function DisputeDetailPage() {
   const [dispute, setDispute] = useState<DisputeData | null>(null);
   const [agreement, setAgreement] = useState<Agreement | null>(null);
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [showSubmitModal, setShowSubmitModal] = useState(false);
-  const [submitTarget, setSubmitTarget] = useState<'merchant' | 'issuer'>('merchant');
-  const [merchantEmail, setMerchantEmail] = useState('');
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
@@ -70,29 +67,49 @@ export default function DisputeDetailPage() {
     fetchData();
   }, [disputeId, router]);
 
-  const handleSubmit = async () => {
-    if (!dispute) return;
-    setSubmitting(true);
+  const handleDownloadEvidence = () => {
+    if (!dispute || !agreement) return;
+    setDownloading(true);
 
     try {
-      const res = await fetch(`/api/disputes/${disputeId}/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          target: submitTarget,
-          merchantEmail: submitTarget === 'merchant' ? merchantEmail : undefined,
-        }),
-      });
+      // Create evidence package JSON
+      const evidencePackage = {
+        disputeId: dispute.id,
+        createdAt: dispute.createdAt,
+        merchant: {
+          name: agreement.merchantName,
+          documentTitle: agreement.documentTitle,
+        },
+        issue: {
+          type: dispute.issueType,
+          description: dispute.description,
+        },
+        evidence: {
+          originalAgreement: dispute.evidencePackage?.originalAgreement,
+          documentHash: agreement.documentHash,
+          capturedAt: agreement.capturedAt,
+          extractedTerms: dispute.evidencePackage?.extractedTerms,
+          violationAnalysis: dispute.evidencePackage?.violationAnalysis,
+          riskFlags: agreement.riskFlags,
+        },
+        generatedAt: new Date().toISOString(),
+        generatedBy: 'RECEIPTS - Agreement Evidence Layer',
+      };
 
-      if (res.ok) {
-        const data = await res.json();
-        setDispute(data.dispute);
-        setShowSubmitModal(false);
-      }
+      // Download as JSON file
+      const blob = new Blob([JSON.stringify(evidencePackage, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `evidence-package-${dispute.id.slice(0, 8)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     } catch (error) {
-      console.error('Failed to submit dispute:', error);
+      console.error('Failed to download evidence:', error);
     } finally {
-      setSubmitting(false);
+      setDownloading(false);
     }
   };
 
@@ -142,10 +159,10 @@ export default function DisputeDetailPage() {
   };
 
   const timelineSteps = [
-    { status: 'draft', label: 'Draft Created', description: 'Evidence package prepared' },
-    { status: 'submitted', label: 'Submitted', description: 'Sent to merchant/issuer' },
-    { status: 'in_review', label: 'In Review', description: 'Awaiting response' },
-    { status: 'resolved', label: 'Resolved', description: 'Dispute concluded' },
+    { status: 'draft', label: 'Evidence Captured', description: 'Document hashed and stored' },
+    { status: 'submitted', label: 'Evidence Downloaded', description: 'Package exported' },
+    { status: 'in_review', label: 'User Action', description: 'Submit to merchant yourself' },
+    { status: 'resolved', label: 'Resolved', description: 'Outcome recorded' },
   ];
 
   const getStepStatus = (stepStatus: string, currentStatus: string) => {
@@ -217,12 +234,16 @@ export default function DisputeDetailPage() {
             </p>
           </div>
 
-          {dispute.status === 'draft' && (
+          {dispute.evidencePackage && (
             <button
-              onClick={() => setShowSubmitModal(true)}
-              className="btn-primary"
+              onClick={handleDownloadEvidence}
+              disabled={downloading}
+              className="btn-primary flex items-center gap-2"
             >
-              Submit Dispute
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              {downloading ? 'Downloading...' : 'Download Evidence'}
             </button>
           )}
         </div>
@@ -362,19 +383,19 @@ export default function DisputeDetailPage() {
               </div>
             )}
 
-            {/* Timestamp Proof */}
+            {/* Document Hash */}
             {dispute.evidencePackage.timestampProof && (
               <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
                 <div className="flex items-center gap-3">
                   <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                   </svg>
                   <div>
-                    <p className="font-medium text-gray-900">Timestamp Proof</p>
+                    <p className="font-medium text-gray-900">Document Hash</p>
                     <p className="text-sm text-gray-500 font-mono">{dispute.evidencePackage.timestampProof}</p>
                   </div>
                 </div>
-                <span className="badge bg-green-100 text-green-700">Verified</span>
+                <span className="badge bg-green-100 text-green-700">Immutable</span>
               </div>
             )}
 
@@ -413,92 +434,6 @@ export default function DisputeDetailPage() {
         </div>
       )}
 
-      {/* Submit Modal */}
-      {showSubmitModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
-            <h2 className="text-xl font-bold text-gray-900 mb-4">Submit Dispute</h2>
-            <p className="text-gray-600 mb-6">
-              Choose where to submit your dispute. RECEIPTS will include your complete evidence package.
-            </p>
-
-            <div className="space-y-3 mb-6">
-              <label
-                className={`flex items-start gap-3 p-4 border rounded-lg cursor-pointer transition-all ${
-                  submitTarget === 'merchant'
-                    ? 'border-primary-500 bg-primary-50'
-                    : 'border-gray-200 hover:border-gray-300'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="submitTarget"
-                  value="merchant"
-                  checked={submitTarget === 'merchant'}
-                  onChange={() => setSubmitTarget('merchant')}
-                  className="mt-1"
-                />
-                <div className="flex-1">
-                  <p className="font-medium text-gray-900">Submit to Merchant</p>
-                  <p className="text-sm text-gray-500">
-                    Send directly to {agreement?.merchantName || 'the merchant'}. Recommended first step.
-                  </p>
-                  {submitTarget === 'merchant' && (
-                    <input
-                      type="email"
-                      placeholder="Merchant support email address"
-                      value={merchantEmail}
-                      onChange={(e) => setMerchantEmail(e.target.value)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="mt-3 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    />
-                  )}
-                </div>
-              </label>
-
-              <label
-                className={`flex items-start gap-3 p-4 border rounded-lg cursor-pointer transition-all ${
-                  submitTarget === 'issuer'
-                    ? 'border-primary-500 bg-primary-50'
-                    : 'border-gray-200 hover:border-gray-300'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="submitTarget"
-                  value="issuer"
-                  checked={submitTarget === 'issuer'}
-                  onChange={() => setSubmitTarget('issuer')}
-                  className="mt-1"
-                />
-                <div>
-                  <p className="font-medium text-gray-900">Escalate to Card Issuer</p>
-                  <p className="text-sm text-gray-500">
-                    File a chargeback with your payment provider. Use if merchant is unresponsive.
-                  </p>
-                </div>
-              </label>
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowSubmitModal(false)}
-                className="btn-secondary flex-1"
-                disabled={submitting}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSubmit}
-                className="btn-primary flex-1"
-                disabled={submitting || (submitTarget === 'merchant' && !merchantEmail)}
-              >
-                {submitting ? 'Submitting...' : 'Submit Dispute'}
-              </button>
-            </div>
           </div>
-        </div>
-      )}
-    </div>
   );
 }

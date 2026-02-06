@@ -44,54 +44,52 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Hero - Dispute Resolution Focus */}
+      {/* Hero - Evidence Layer Focus */}
       <section className="max-w-5xl mx-auto px-6 py-20 text-center">
-        <div className="inline-flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 rounded-full text-sm font-medium mb-6">
-          <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-          87% of disputes resolved in user&apos;s favor
+        <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary-50 text-primary-700 rounded-full text-sm font-medium mb-6">
+          <span className="w-2 h-2 bg-primary-500 rounded-full animate-pulse"></span>
+          Agreement Evidence Layer for AI Agents
         </div>
 
         <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-6 leading-tight">
-          When AI Transactions Go Wrong,<br />
-          <span className="text-primary-600">We Make Them Right</span>
+          Prove What Your AI Agent<br />
+          <span className="text-primary-600">Actually Agreed To</span>
         </h1>
 
         <p className="text-xl text-gray-600 mb-10 max-w-3xl mx-auto">
-          Your AI agent booked the wrong flight. The merchant won&apos;t refund.
-          Their ToS says &quot;binding arbitration only.&quot;
-          <br /><br />
-          <strong>RECEIPTS fights back.</strong> We capture every agreement, analyze the fine print,
-          and help you recover your money—even when merchants say no.
+          When AI agents transact on behalf of users, nobody can prove what was agreed to.
+          RECEIPTS captures every agreement with timestamped evidence, analyzes risky clauses,
+          and validates against user policies—so you have proof when you need it.
         </p>
 
         <div className="flex flex-wrap items-center justify-center gap-4 mb-12">
           <Link
-            href="/dashboard/disputes/new"
+            href="/dashboard/integrate"
             className="px-8 py-4 bg-primary-600 text-white rounded-xl font-semibold text-lg hover:bg-primary-700 transition-colors shadow-lg shadow-primary-600/25"
           >
-            Start a Dispute
+            Get the SDK
           </Link>
           <Link
             href="/playground"
             className="px-8 py-4 bg-white text-gray-700 rounded-xl font-semibold text-lg hover:bg-gray-50 transition-colors border border-gray-200"
           >
-            Check Any ToS
+            Try Risk Scanner
           </Link>
         </div>
 
-        {/* Stats */}
+        {/* What We Actually Do */}
         <div className="grid grid-cols-3 gap-8 max-w-2xl mx-auto">
           <div className="text-center">
-            <div className="text-3xl font-bold text-primary-600">87%</div>
-            <div className="text-sm text-gray-500">Success Rate</div>
+            <div className="text-3xl font-bold text-primary-600">📸</div>
+            <div className="text-sm text-gray-500 mt-1">Capture & Hash</div>
           </div>
           <div className="text-center">
-            <div className="text-3xl font-bold text-primary-600">4.2</div>
-            <div className="text-sm text-gray-500">Days Avg Resolution</div>
+            <div className="text-3xl font-bold text-primary-600">🔍</div>
+            <div className="text-sm text-gray-500 mt-1">Analyze Risks</div>
           </div>
           <div className="text-center">
-            <div className="text-3xl font-bold text-primary-600">$2.3M</div>
-            <div className="text-sm text-gray-500">Recovered</div>
+            <div className="text-3xl font-bold text-primary-600">✓</div>
+            <div className="text-sm text-gray-500 mt-1">Validate Policy</div>
           </div>
         </div>
       </section>
@@ -99,12 +97,12 @@ export default function Home() {
       {/* How It Works */}
       <section className="bg-gray-900 text-white py-20">
         <div className="max-w-6xl mx-auto px-6">
-          <h2 className="text-3xl font-bold text-center mb-4">How RECEIPTS Protects You</h2>
+          <h2 className="text-3xl font-bold text-center mb-4">How RECEIPTS Works</h2>
           <p className="text-gray-400 text-center mb-16 max-w-2xl mx-auto">
-            From the moment your agent accepts an agreement to the moment you get your money back
+            A simple SDK that captures agreements before your agent accepts them
           </p>
 
-          <div className="grid md:grid-cols-4 gap-8">
+          <div className="grid md:grid-cols-3 gap-8">
             <div className="text-center">
               <div className="w-16 h-16 bg-primary-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
                 <span className="text-3xl">📸</span>
@@ -112,7 +110,7 @@ export default function Home() {
               <div className="text-sm text-primary-400 font-semibold mb-2">STEP 1</div>
               <h3 className="text-lg font-semibold mb-2">Capture</h3>
               <p className="text-gray-400 text-sm">
-                Every agreement your agent accepts is timestamped and stored with immutable proof
+                Agent calls our SDK before accepting any terms. We hash and timestamp the document with cryptographic proof.
               </p>
             </div>
 
@@ -123,93 +121,82 @@ export default function Home() {
               <div className="text-sm text-primary-400 font-semibold mb-2">STEP 2</div>
               <h3 className="text-lg font-semibold mb-2">Analyze</h3>
               <p className="text-gray-400 text-sm">
-                When something goes wrong, AI finds the violations in their own terms
-              </p>
-            </div>
-
-            <div className="text-center">
-              <div className="w-16 h-16 bg-primary-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                <span className="text-3xl">⚔️</span>
-              </div>
-              <div className="text-sm text-primary-400 font-semibold mb-2">STEP 3</div>
-              <h3 className="text-lg font-semibold mb-2">Dispute</h3>
-              <p className="text-gray-400 text-sm">
-                Pre-written legal arguments based on their own ToS—submitted to merchant or card issuer
+                AI extracts risky clauses: binding arbitration, auto-renewal, no refunds, class action waivers, and more.
               </p>
             </div>
 
             <div className="text-center">
               <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                <span className="text-3xl">💰</span>
+                <span className="text-3xl">✓</span>
               </div>
-              <div className="text-sm text-green-400 font-semibold mb-2">STEP 4</div>
-              <h3 className="text-lg font-semibold mb-2">Recover</h3>
+              <div className="text-sm text-green-400 font-semibold mb-2">STEP 3</div>
+              <h3 className="text-lg font-semibold mb-2">Validate</h3>
               <p className="text-gray-400 text-sm">
-                Get your money back, even from &quot;no refund&quot; merchants
+                Check against user policies. Returns &quot;proceed&quot;, &quot;require approval&quot;, or &quot;block&quot;—with evidence stored for later.
               </p>
             </div>
           </div>
         </div>
       </section>
 
-      {/* The Problem - Real Scenario */}
+      {/* The Problem */}
       <section className="py-20">
         <div className="max-w-6xl mx-auto px-6">
           <div className="grid md:grid-cols-2 gap-12 items-center">
             <div>
               <h2 className="text-3xl font-bold text-gray-900 mb-6">
-                This happens every day
+                The Problem with AI Transactions
               </h2>
               <div className="space-y-4">
                 <div className="flex items-start gap-4 p-4 bg-red-50 rounded-lg border border-red-100">
-                  <span className="text-2xl">😤</span>
+                  <span className="text-2xl">❓</span>
                   <div>
-                    <div className="font-semibold text-gray-900">Agent books wrong dates</div>
-                    <div className="text-sm text-gray-600">Hotel says &quot;non-refundable booking&quot;</div>
+                    <div className="font-semibold text-gray-900">No proof of what was agreed</div>
+                    <div className="text-sm text-gray-600">When disputes happen, it&apos;s your word against the merchant&apos;s</div>
                   </div>
                 </div>
                 <div className="flex items-start gap-4 p-4 bg-red-50 rounded-lg border border-red-100">
-                  <span className="text-2xl">😤</span>
+                  <span className="text-2xl">⚠️</span>
                   <div>
-                    <div className="font-semibold text-gray-900">Order never arrives</div>
-                    <div className="text-sm text-gray-600">Merchant points to &quot;binding arbitration&quot; clause</div>
+                    <div className="font-semibold text-gray-900">Hidden risky clauses</div>
+                    <div className="text-sm text-gray-600">Agents accept terms without understanding binding arbitration or no-refund policies</div>
                   </div>
                 </div>
                 <div className="flex items-start gap-4 p-4 bg-red-50 rounded-lg border border-red-100">
-                  <span className="text-2xl">😤</span>
+                  <span className="text-2xl">🎯</span>
                   <div>
-                    <div className="font-semibold text-gray-900">Subscription auto-renewed</div>
-                    <div className="text-sm text-gray-600">Company refuses refund citing ToS Section 12.4</div>
+                    <div className="font-semibold text-gray-900">Agents get blamed</div>
+                    <div className="text-sm text-gray-600">No audit trail means agents can be held liable for anything</div>
                   </div>
                 </div>
               </div>
             </div>
             <div className="bg-green-50 rounded-2xl p-8 border border-green-200">
               <div className="text-sm text-green-600 font-semibold mb-2">WITH RECEIPTS</div>
-              <h3 className="text-2xl font-bold text-gray-900 mb-4">You fight back with evidence</h3>
+              <h3 className="text-2xl font-bold text-gray-900 mb-4">You have evidence</h3>
               <ul className="space-y-3">
                 <li className="flex items-start gap-3">
                   <span className="text-green-500 mt-1">✓</span>
-                  <span className="text-gray-700">Timestamped proof of what was agreed</span>
+                  <span className="text-gray-700">Cryptographic hash of the exact document agreed to</span>
                 </li>
                 <li className="flex items-start gap-3">
                   <span className="text-green-500 mt-1">✓</span>
-                  <span className="text-gray-700">AI-generated legal arguments from their own terms</span>
+                  <span className="text-gray-700">Timestamp proving when agreement was captured</span>
                 </li>
                 <li className="flex items-start gap-3">
                   <span className="text-green-500 mt-1">✓</span>
-                  <span className="text-gray-700">Submit to merchant or escalate to card issuer</span>
+                  <span className="text-gray-700">AI analysis identifying risky clauses</span>
                 </li>
                 <li className="flex items-start gap-3">
                   <span className="text-green-500 mt-1">✓</span>
-                  <span className="text-gray-700">Track resolution until you get your money back</span>
+                  <span className="text-gray-700">Audit trail for compliance and disputes</span>
                 </li>
               </ul>
               <Link
-                href="/dashboard/disputes/new"
+                href="/dashboard/integrate"
                 className="inline-flex items-center gap-2 mt-6 px-6 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors"
               >
-                Start a Dispute
+                View Documentation
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
                 </svg>
@@ -223,8 +210,8 @@ export default function Home() {
       <section className="bg-gray-50 py-16 border-y border-gray-200">
         <div className="max-w-4xl mx-auto px-6">
           <div className="text-center mb-8">
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Check Any Terms of Service</h2>
-            <p className="text-gray-600">Scan before you agree. Know what traps are hiding in the fine print.</p>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Risk Scanner</h2>
+            <p className="text-gray-600">Analyze any terms of service. Know what risks are hiding in the fine print.</p>
           </div>
 
           <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
@@ -266,8 +253,8 @@ export default function Home() {
       <section className="py-16">
         <div className="max-w-6xl mx-auto px-6">
           <div className="text-center mb-10">
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Merchants With The Worst Dispute Records</h2>
-            <p className="text-gray-600">Ranked by how hard they make it to get your money back</p>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Hall of Shame</h2>
+            <p className="text-gray-600">Companies with the most user-hostile terms of service</p>
           </div>
 
           <div className="grid md:grid-cols-3 gap-6 mb-8">
@@ -337,36 +324,45 @@ export default function Home() {
         </div>
       </section>
 
-      {/* For Developers */}
+      {/* For Developers - THE MAIN PRODUCT */}
       <section className="bg-gray-900 py-16 text-white">
         <div className="max-w-6xl mx-auto px-6">
           <div className="text-center mb-10">
             <span className="inline-block px-3 py-1 bg-primary-500/20 text-primary-300 rounded-full text-sm font-medium mb-4">
-              FOR AI DEVELOPERS
+              THE SDK
             </span>
-            <h2 className="text-3xl font-bold mb-4">Protect Your Agent&apos;s Transactions</h2>
+            <h2 className="text-3xl font-bold mb-4">Integrate in Minutes</h2>
             <p className="text-gray-400 max-w-2xl mx-auto">
-              Integrate RECEIPTS so when disputes happen, you have the evidence to win.
-              Reduce chargebacks. Protect users. Build trust.
+              Add agreement capture to your AI agent with a few lines of code.
+              Works with Claude, OpenAI, LangChain, and any custom agent.
             </p>
           </div>
 
-          <div className="bg-gray-800 rounded-xl p-6 max-w-2xl mx-auto mb-8">
-            <div className="text-sm text-gray-400 mb-2 font-mono">// Protect every transaction:</div>
+          <div className="bg-gray-800 rounded-xl p-6 max-w-3xl mx-auto mb-8">
+            <div className="text-sm text-gray-400 mb-2 font-mono">npm install @receipts/agreement-guard</div>
             <pre className="text-sm text-gray-300 font-mono overflow-x-auto">
-{`const receipt = await receipts.capture({
-  url: tosUrl,
-  agentId: "your-agent-id",
-  userId: "user-123",
-  transactionAmount: 299.00
+{`import { AgreementGuard } from '@receipts/agreement-guard';
+
+const guard = new AgreementGuard({
+  agentId: 'my-agent-123',
+  agentType: 'claude-code',
+  apiKey: process.env.RECEIPTS_API_KEY,
 });
 
-// When dispute needed:
-const dispute = await receipts.createDispute({
-  receiptId: receipt.id,
-  issueType: "not_delivered"
+// Before accepting any terms of service
+const result = await guard.capture({
+  documentText: termsOfServiceText,
+  sourceUrl: 'https://merchant.com/terms',
 });
-// Returns: evidence package, legal arguments, submission path`}
+
+if (result.recommendation === 'proceed') {
+  // Safe to accept - receipt captured
+  console.log('Trust score:', result.trustScore);
+} else if (result.recommendation === 'require_approval') {
+  // Ask user for explicit approval
+} else {
+  // Block - do not accept these terms
+}`}
             </pre>
           </div>
 
@@ -375,14 +371,16 @@ const dispute = await receipts.createDispute({
               href="/dashboard/integrate"
               className="px-6 py-3 bg-primary-600 text-white rounded-lg font-semibold hover:bg-primary-500 transition-colors"
             >
-              View API Docs
+              View Full Documentation
             </Link>
-            <Link
-              href="/pricing"
+            <a
+              href="https://www.npmjs.com/package/@receipts/agreement-guard"
+              target="_blank"
+              rel="noopener noreferrer"
               className="px-6 py-3 bg-gray-700 text-white rounded-lg font-semibold hover:bg-gray-600 transition-colors"
             >
-              See Pricing
-            </Link>
+              View on npm
+            </a>
           </div>
         </div>
       </section>
@@ -391,18 +389,18 @@ const dispute = await receipts.createDispute({
       <section className="py-20 bg-gradient-to-b from-white to-primary-50">
         <div className="max-w-4xl mx-auto px-6 text-center">
           <h2 className="text-3xl font-bold text-gray-900 mb-4">
-            Stop Losing Money to Unfair Terms
+            Build Trustworthy AI Agents
           </h2>
           <p className="text-lg text-gray-600 mb-8">
-            Whether your AI agent made a mistake or the merchant is being unfair,
-            RECEIPTS helps you get your money back.
+            Give your users evidence of what their agent agreed to.
+            Capture every agreement. Analyze every risk. Validate every policy.
           </p>
           <div className="flex flex-wrap justify-center gap-4">
             <Link
-              href="/dashboard/disputes/new"
+              href="/dashboard/integrate"
               className="inline-flex items-center gap-2 bg-primary-600 text-white px-8 py-4 rounded-xl font-semibold text-lg hover:bg-primary-700 transition-colors"
             >
-              Start a Dispute
+              Get Started
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
               </svg>
@@ -420,7 +418,7 @@ const dispute = await receipts.createDispute({
       {/* Footer */}
       <footer className="border-t border-gray-100 py-8">
         <div className="max-w-7xl mx-auto px-6 text-center text-gray-500 text-sm">
-          <p>RECEIPTS - When AI transactions go wrong, we make them right.</p>
+          <p>RECEIPTS - Agreement Evidence Layer for AI Agents</p>
           <p className="mt-2">A <span className="text-primary-600">Remaster Labs</span> product</p>
         </div>
       </footer>

@@ -5,6 +5,9 @@
  * before they are accepted.
  */
 
+import { ApiClient } from './client';
+import { DEFAULT_BASE_URL, DEFAULT_TIMEOUT, MIN_ANCHOR_TRUST_SCORE } from './constants';
+import { TrustScoreError } from './errors';
 import type {
   AgreementGuardConfig,
   CaptureOptions,
@@ -12,16 +15,17 @@ import type {
   AnchorResult,
   ReputationResult,
   RegistrationResult,
+  ValidateResult,
+  CaptureResponse,
+  ParseResponse,
 } from './types';
 
-const DEFAULT_BASE_URL = 'http://localhost:3000';
-const DEFAULT_TIMEOUT = 30000;
-
 export class AgreementGuard {
-  private config: Required<Omit<AgreementGuardConfig, 'apiKey' | 'userId'>> & {
+  private readonly config: Required<Omit<AgreementGuardConfig, 'apiKey' | 'userId'>> & {
     apiKey?: string;
     userId?: string;
   };
+  private readonly client: ApiClient;
   private registered = false;
 
   constructor(config: AgreementGuardConfig) {
@@ -35,6 +39,13 @@ export class AgreementGuard {
       timeout: config.timeout || DEFAULT_TIMEOUT,
     };
 
+    this.client = new ApiClient({
+      baseUrl: this.config.baseUrl,
+      apiKey: this.config.apiKey,
+      timeout: this.config.timeout,
+      debug: this.config.debug,
+    });
+
     this.log('Agreement Guard initialized', {
       agentId: this.config.agentId,
       agentType: this.config.agentType,
@@ -47,24 +58,21 @@ export class AgreementGuard {
   // ============================================
 
   /**
-   * Register this agent with REMASTER.
+   * Register this agent with RECEIPTS.
    * Should be called once when the agent starts.
    */
   async register(): Promise<RegistrationResult> {
     this.log('Registering agent...');
 
-    const response = await this.request('/api/agents/register', {
-      method: 'POST',
-      body: {
-        agentId: this.config.agentId,
-        agentType: this.config.agentType,
-      },
+    const response = await this.client.post<RegistrationResult>('/api/agents/register', {
+      agentId: this.config.agentId,
+      agentType: this.config.agentType,
     });
 
     this.registered = true;
     this.log('Agent registered', response);
 
-    return response as RegistrationResult;
+    return response;
   }
 
   /**
@@ -81,30 +89,24 @@ export class AgreementGuard {
     this.log('Capturing agreement...', { sourceUrl: options.sourceUrl });
 
     // Step 1: Capture the document
-    const captureResponse = await this.request('/api/capture', {
-      method: 'POST',
-      body: {
-        documentText: options.documentText,
-        sourceUrl: options.sourceUrl,
-        merchantName: options.merchantName,
-        agentId: this.config.agentId,
-        agentType: this.config.agentType,
-      },
+    const captureResponse = await this.client.post<CaptureResponse>('/api/capture', {
+      documentText: options.documentText,
+      sourceUrl: options.sourceUrl,
+      merchantName: options.merchantName,
+      agentId: this.config.agentId,
+      agentType: this.config.agentType,
     });
 
     // Step 2: Parse and validate
-    const parseResponse = await this.request('/api/parse', {
-      method: 'POST',
-      body: {
-        documentText: options.documentText,
-        merchantName: options.merchantName,
-        sourceUrl: options.sourceUrl,
-        returnPAO: true,
-        validatePolicy: true,
-        agentId: this.config.agentId,
-        agentType: this.config.agentType,
-        userId: this.config.userId,
-      },
+    const parseResponse = await this.client.post<ParseResponse>('/api/parse', {
+      documentText: options.documentText,
+      merchantName: options.merchantName,
+      sourceUrl: options.sourceUrl,
+      returnPAO: true,
+      validatePolicy: true,
+      agentId: this.config.agentId,
+      agentType: this.config.agentType,
+      userId: this.config.userId,
     });
 
     // Combine results
@@ -139,6 +141,18 @@ export class AgreementGuard {
   }
 
   /**
+   * Retrieve a previously captured agreement.
+   */
+  async getCapture(captureId: string): Promise<CaptureResponse> {
+    this.log('Fetching capture...', { captureId });
+
+    const response = await this.client.get<CaptureResponse>(`/api/capture?captureId=${encodeURIComponent(captureId)}`);
+
+    this.log('Capture fetched', response);
+    return response;
+  }
+
+  /**
    * Anchor a captured agreement on Base L2.
    * Creates an immutable timestamp proof.
    *
@@ -147,13 +161,20 @@ export class AgreementGuard {
   async anchor(captureId: string, termsHash: string): Promise<AnchorResult> {
     this.log('Anchoring agreement on Base...', { captureId, termsHash });
 
-    const response = await this.request('/api/anchor', {
-      method: 'POST',
-      body: {
-        termsHash,
-        captureId,
-        agentId: this.config.agentId,
-      },
+    // Check trust score first
+    const reputation = await this.getReputation();
+    if (reputation.trustScore < MIN_ANCHOR_TRUST_SCORE) {
+      throw new TrustScoreError(
+        `Trust score ${reputation.trustScore} is below the required ${MIN_ANCHOR_TRUST_SCORE} for on-chain anchoring`,
+        MIN_ANCHOR_TRUST_SCORE,
+        reputation.trustScore
+      );
+    }
+
+    const response = await this.client.post<AnchorResult & { success: boolean; error?: string }>('/api/anchor', {
+      termsHash,
+      captureId,
+      agentId: this.config.agentId,
     });
 
     if (!response.success) {
@@ -181,9 +202,8 @@ export class AgreementGuard {
   async getReputation(): Promise<ReputationResult> {
     this.log('Fetching reputation...');
 
-    const response = await this.request(
-      `/api/agents/${encodeURIComponent(this.config.agentId)}/reputation`,
-      { method: 'GET' }
+    const response = await this.client.get<ReputationResult>(
+      `/api/agents/${encodeURIComponent(this.config.agentId)}/reputation`
     );
 
     this.log('Reputation fetched', {
@@ -191,28 +211,20 @@ export class AgreementGuard {
       tier: response.tier?.name,
     });
 
-    return response as ReputationResult;
+    return response;
   }
 
   /**
    * Validate a PAO against policy without capturing.
    * Useful for checking before displaying to user.
    */
-  async validate(pao: unknown): Promise<{
-    allowed: boolean;
-    recommendation: 'proceed' | 'require_approval' | 'block';
-    violations: Array<{ rule: string; description: string }>;
-    agentMessage: string;
-  }> {
+  async validate(pao: unknown): Promise<ValidateResult> {
     this.log('Validating PAO...');
 
-    const response = await this.request('/api/validate', {
-      method: 'POST',
-      body: {
-        pao,
-        agentId: this.config.agentId,
-        userId: this.config.userId,
-      },
+    const response = await this.client.post<ValidateResult>('/api/validate', {
+      pao,
+      agentId: this.config.agentId,
+      userId: this.config.userId,
     });
 
     return {
@@ -221,6 +233,19 @@ export class AgreementGuard {
       violations: response.violations,
       agentMessage: response.agentMessage,
     };
+  }
+
+  /**
+   * Health check - verify connection to RECEIPTS API.
+   */
+  async heartbeat(): Promise<{ ok: boolean; latencyMs: number }> {
+    const start = Date.now();
+    try {
+      await this.client.get('/api/health');
+      return { ok: true, latencyMs: Date.now() - start };
+    } catch {
+      return { ok: false, latencyMs: Date.now() - start };
+    }
   }
 
   // ============================================
@@ -264,53 +289,24 @@ export class AgreementGuard {
       .trim();
   }
 
+  /**
+   * Get the current configuration (for debugging)
+   */
+  getConfig(): Readonly<Omit<typeof this.config, 'apiKey'>> {
+    const { apiKey: _, ...safeConfig } = this.config;
+    return safeConfig;
+  }
+
+  /**
+   * Check if the agent has been registered
+   */
+  isRegistered(): boolean {
+    return this.registered;
+  }
+
   // ============================================
   // Private Methods
   // ============================================
-
-  private async request(
-    path: string,
-    options: {
-      method: 'GET' | 'POST';
-      body?: unknown;
-    }
-  ): Promise<any> {
-    const url = `${this.config.baseUrl}${path}`;
-
-    const fetchOptions: RequestInit = {
-      method: options.method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(this.config.apiKey && { Authorization: `Bearer ${this.config.apiKey}` }),
-      },
-    };
-
-    if (options.body) {
-      fetchOptions.body = JSON.stringify(options.body);
-    }
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
-    fetchOptions.signal = controller.signal;
-
-    try {
-      const response = await fetch(url, fetchOptions);
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(error.error || `HTTP ${response.status}`);
-      }
-
-      return response.json();
-    } catch (error) {
-      clearTimeout(timeoutId);
-      if ((error as Error).name === 'AbortError') {
-        throw new Error('Request timed out');
-      }
-      throw error;
-    }
-  }
 
   private log(message: string, data?: unknown): void {
     if (this.config.debug) {
@@ -318,7 +314,7 @@ export class AgreementGuard {
     }
   }
 
-  private generateAgentMessage(parseResponse: any): string {
+  private generateAgentMessage(parseResponse: ParseResponse): string {
     const recommendation = parseResponse.policyResult?.recommendation || 'proceed';
     const trustScore = parseResponse.policyResult?.agentTrustScore || 10;
     const riskFlags = parseResponse.riskFlags || [];
@@ -326,11 +322,11 @@ export class AgreementGuard {
     if (recommendation === 'block') {
       const violations = parseResponse.policyResult?.violations || [];
       const blockReasons = violations
-        .filter((v: any) => v.severity === 'block')
-        .map((v: any) => v.description)
+        .filter((v) => v.severity === 'block')
+        .map((v) => v.description)
         .join('; ');
 
-      return `🚫 AGREEMENT BLOCKED
+      return `AGREEMENT BLOCKED
 
 This agreement cannot be accepted because: ${blockReasons || 'Policy violation'}
 
@@ -343,7 +339,7 @@ RECOMMENDED ACTION: Inform your human and ask if they want to proceed differentl
     }
 
     if (recommendation === 'require_approval') {
-      return `⚠️ HUMAN APPROVAL REQUIRED
+      return `HUMAN APPROVAL REQUIRED
 
 This agreement requires human approval before you can proceed.
 Your current trust score (${trustScore}/100) doesn't allow auto-approval for this category.
@@ -353,7 +349,7 @@ Risk flags detected: ${riskFlags.length > 0 ? riskFlags.join(', ') : 'None'}
 RECOMMENDED ACTION: Ask your human for explicit approval.`;
     }
 
-    return `✅ AGREEMENT VALIDATED
+    return `AGREEMENT VALIDATED
 
 This agreement passed all policy checks. You can proceed safely.
 

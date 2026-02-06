@@ -105,16 +105,15 @@ const API_ENDPOINTS = [
   {
     method: 'POST',
     path: '/api/anchor',
-    description: 'Anchor termsHash on Base L2 (requires trust >= 61)',
+    description: 'Create verification hash for captured agreement (requires trust >= 61)',
     request: `{
-  "termsHash": "0x...",
+  "termsHash": "sha256:...",
   "captureId": "cap_abc123",
   "agentId": "your-agent-id"
 }`,
     response: `{
-  "blockchainTxId": "0x...",
-  "anchorTimestamp": "2024-01-15T10:31:00Z",
-  "explorerUrl": "https://sepolia.basescan.org/tx/0x..."
+  "verificationHash": "verify:cap_abc123-...",
+  "anchorTimestamp": "2024-01-15T10:31:00Z"
 }`,
   },
   {

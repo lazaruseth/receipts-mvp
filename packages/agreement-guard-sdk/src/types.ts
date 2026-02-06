@@ -290,3 +290,84 @@ export interface RegistrationResult {
    */
   welcomeMessage?: string;
 }
+
+// ============================================
+// API Response Types
+// ============================================
+
+/**
+ * Response from /api/capture
+ */
+export interface CaptureResponse {
+  status: 'captured' | 'failed';
+  captureId: string;
+  documentHash: string;
+  timestamp: string;
+  error?: string;
+}
+
+/**
+ * Response from /api/parse
+ */
+export interface ParseResponse {
+  success: boolean;
+  extractedTerms?: Record<string, unknown>;
+  riskFlags?: string[];
+  plainSummary?: string;
+  pao?: {
+    version: string;
+    termsHash: string;
+    parties: {
+      principal: string;
+      counterparty: string;
+    };
+    scope: {
+      category: AgreementCategory;
+      item?: string;
+      description?: string;
+    };
+    remedies: {
+      refundable: 'full' | 'partial' | 'none' | 'conditional';
+      chargebackRights: 'preserved' | 'waived' | 'limited' | 'unknown';
+    };
+    dispute: {
+      forum: 'courts' | 'arbitration' | 'mediation' | 'unspecified';
+      classActionWaiver: boolean;
+    };
+    data: {
+      thirdPartySharing: boolean;
+      training: 'allowed' | 'opt_out' | 'forbidden' | 'unspecified';
+    };
+    time: {
+      capturedAt: string;
+      acceptedAt?: string;
+      expiresAt?: string;
+    };
+    termsURI: string;
+  };
+  policyResult?: {
+    recommendation: 'proceed' | 'require_approval' | 'block';
+    violations: Array<{
+      rule: string;
+      severity: 'block' | 'warn';
+      description: string;
+    }>;
+    warnings: Array<{
+      type: string;
+      description: string;
+      recommendation: string;
+    }>;
+    agentTrustScore: number;
+  };
+  error?: string;
+}
+
+/**
+ * Response from /api/validate
+ */
+export interface ValidateResult {
+  allowed: boolean;
+  recommendation: 'proceed' | 'require_approval' | 'block';
+  violations: Array<{ rule: string; description: string }>;
+  agentMessage: string;
+}
