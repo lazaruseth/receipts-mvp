@@ -339,9 +339,9 @@ export default function Home() {
           </div>
 
           <div className="bg-gray-800 rounded-xl p-6 max-w-3xl mx-auto mb-8">
-            <div className="text-sm text-gray-400 mb-2 font-mono">npm install @receipts/agreement-guard</div>
+            <div className="text-sm text-gray-400 mb-2 font-mono">npm install @lazaruseth/agreement-guard</div>
             <pre className="text-sm text-gray-300 font-mono overflow-x-auto">
-{`import { AgreementGuard } from '@receipts/agreement-guard';
+{`import { AgreementGuard } from '@lazaruseth/agreement-guard';
 
 const guard = new AgreementGuard({
   agentId: 'my-agent-123',
@@ -374,7 +374,7 @@ if (result.recommendation === 'proceed') {
               View Full Documentation
             </Link>
             <a
-              href="https://www.npmjs.com/package/@receipts/agreement-guard"
+              href="https://www.npmjs.com/package/@lazaruseth/agreement-guard"
               target="_blank"
               rel="noopener noreferrer"
               className="px-6 py-3 bg-gray-700 text-white rounded-lg font-semibold hover:bg-gray-600 transition-colors"
