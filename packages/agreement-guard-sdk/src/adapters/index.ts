@@ -19,3 +19,12 @@ export type { OpenAIFunctionDefinition, OpenAIToolDefinition, OpenAIFunctionInpu
 // LangChain
 export { AgreementGuardTool, createAgreementGuardTool } from './langchain';
 export type { LangChainToolInput } from './langchain';
+
+// OpenClaw
+export { OpenClawAdapter } from './openclaw';
+export type {
+  OpenClawSkillDefinition,
+  OpenClawActionContext,
+  OpenClawHookResult,
+  OpenClawSkillInput
+} from './openclaw';

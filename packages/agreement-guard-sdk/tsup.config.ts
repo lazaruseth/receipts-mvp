@@ -8,6 +8,7 @@ export default defineConfig({
     'adapters/claude': 'src/adapters/claude.ts',
     'adapters/openai': 'src/adapters/openai.ts',
     'adapters/langchain': 'src/adapters/langchain.ts',
+    'adapters/openclaw': 'src/adapters/openclaw.ts',
   },
   format: ['cjs', 'esm'],
   dts: true,

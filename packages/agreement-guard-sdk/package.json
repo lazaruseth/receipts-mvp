@@ -1,6 +1,6 @@
 {
   "name": "@lazaruseth/agreement-guard",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Agreement Guard SDK - Protect your AI agent's autonomy by capturing and validating agreements",
   "author": "RECEIPTS",
   "license": "MIT",
@@ -77,6 +77,16 @@
       "require": {
         "types": "./dist/adapters/langchain.d.ts",
         "default": "./dist/adapters/langchain.js"
+      }
+    },
+    "./adapters/openclaw": {
+      "import": {
+        "types": "./dist/adapters/openclaw.d.mts",
+        "default": "./dist/adapters/openclaw.mjs"
+      },
+      "require": {
+        "types": "./dist/adapters/openclaw.d.ts",
+        "default": "./dist/adapters/openclaw.js"
       }
     }
   },
