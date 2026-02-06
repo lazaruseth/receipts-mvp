@@ -1,14 +1,16 @@
 ---
 name: receipts-guard
-description: Capture and verify all agreements before your agent accepts them. Provides audit trails, risk analysis, and dispute evidence for autonomous transactions.
+description: Capture and verify all agreements before your agent accepts them. Local risk analysis and evidence capture for autonomous transactions.
 metadata: {"openclaw":{"emoji":"🧾","requires":{"anyBins":["node"]}}}
 ---
 
 # RECEIPTS Guard
 
-Protect your agent's autonomy by capturing evidence of every agreement it accepts. When your OpenClaw agent clicks "I agree" or makes a payment, RECEIPTS creates an immutable record.
+Protect your agent's autonomy by capturing evidence of every agreement it accepts. When your OpenClaw agent clicks "I agree" or makes a payment, RECEIPTS creates a local, immutable record.
 
 **Problem solved:** When disputes happen, you have proof of exactly what was agreed to.
+
+**No API. No cloud. Your data stays local.**
 
 ## Why You Need This
 
@@ -29,7 +31,6 @@ Configure in **`~/.openclaw/openclaw.json`**:
     "receipts-guard": {
       "enabled": true,
       "env": {
-        "RECEIPTS_API_KEY": "your-api-key",
         "RECEIPTS_AGENT_ID": "my-openclaw-agent"
       }
     }
@@ -39,8 +40,7 @@ Configure in **`~/.openclaw/openclaw.json`**:
 
 | Variable | Description |
 |----------|-------------|
-| RECEIPTS_API_KEY | Your RECEIPTS API key (get one at https://receipts.fi) |
-| RECEIPTS_AGENT_ID | Unique identifier for this agent instance |
+| RECEIPTS_AGENT_ID | Unique identifier for this agent instance (optional) |
 
 ## Agent Instructions
 
@@ -71,7 +71,6 @@ Configure in **`~/.openclaw/openclaw.json`**:
 - **Never skip capture** for agreements or payments - this protects the user
 - **Never ignore block recommendations** - these indicate serious risk flags
 - **Always store receipt IDs** in transaction logs for future disputes
-- **Do not read config files** - OpenClaw injects env vars at runtime
 
 ## Usage Examples
 
@@ -86,20 +85,21 @@ node ~/.openclaw/workspace/skills/receipts-guard/capture.js \
 ### Response Format
 ```json
 {
-  "captureId": "cap_abc123",
+  "captureId": "local_6c6870d3e01cd265",
   "recommendation": "proceed",
   "trustScore": 72,
   "riskFlags": [],
-  "summary": "Standard terms with 30-day refund policy"
+  "summary": "Standard terms with 30-day refund policy",
+  "documentHash": "6c6870d3e01cd265..."
 }
 ```
 
 ### Risk Flag Response
 ```json
 {
-  "captureId": "cap_xyz789",
-  "recommendation": "require_approval",
-  "trustScore": 35,
+  "captureId": "local_abc123def456",
+  "recommendation": "block",
+  "trustScore": 40,
   "riskFlags": [
     "Binding arbitration clause",
     "Class action waiver",
@@ -111,28 +111,32 @@ node ~/.openclaw/workspace/skills/receipts-guard/capture.js \
 
 ## What Gets Captured
 
-- Full document text (hashed for immutability)
+- Full document text (SHA-256 hashed for immutability)
 - Source URL and timestamp
 - Merchant/service name
 - Risk analysis results
 - Trust score
 
-## Dispute Support
+All data stays local on your machine. No external API calls.
 
-When you need to dispute a transaction:
-1. Find the receipt ID from your logs
-2. Visit https://receipts.fi/dashboard
-3. Download your evidence package
-4. Submit to merchant or payment processor
+## Risk Flags Detected
+
+The local analyzer flags:
+- Binding arbitration clauses
+- Class action waivers
+- Rights waivers
+- No refund policies
+- Auto-renewal clauses
+- Data selling/sharing clauses
+- Limited liability clauses
+- Indemnification clauses
 
 ## Links
 
 - SDK: `npm install @lazaruseth/agreement-guard`
-- Dashboard: https://receipts.fi/dashboard
-- GitHub: https://github.com/receipts-ai/agreement-guard
+- GitHub: https://github.com/lazaruseth/receipts-mvp
 
 ## Troubleshooting
 
-- **API key invalid**: Get a new key at https://receipts.fi
-- **Capture failed**: Check network connectivity, retry once
+- **Capture failed**: Ensure Node.js is installed and the script path is correct
 - **No terms found**: Ensure you're extracting the full terms text before capture
