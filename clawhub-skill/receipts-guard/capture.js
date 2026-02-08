@@ -1,25 +1,36 @@
 #!/usr/bin/env node
 /**
- * RECEIPTS Guard v0.3.0 - Local Agreement Capture for OpenClaw
+ * RECEIPTS Guard v0.4.0 - Local Agreement Capture for Autonomous Agents
  *
  * Captures and analyzes agreements locally. No API calls. Your data stays on your machine.
  *
  * Commands:
  *   capture "TERMS_TEXT" "SOURCE_URL" "MERCHANT_NAME" [--consent-type=TYPE] [--element=SELECTOR] [--screenshot=BASE64]
+ *   promise "COMMITMENT_TEXT" "COUNTERPARTY" [--direction=inbound|outbound] [--channel=email|chat|moltbook]
  *   query --merchant="X" --risk-level=high --after="2026-01-01"
  *   list
- *   export --format=json|csv
+ *   export --format=json|csv|pdf
  *   diff --capture1=ID --capture2=ID
  *   dispute --captureId=ID
+ *   witness --captureId=ID [--anchor=moltbook|bitcoin|both]
+ *   rules --list | --add="PATTERN" --flag="FLAG_NAME" | --import=FILE
  *
- * v0.3.0 Features:
- *   - Consent Proofs: Capture HOW consent was given, not just what was agreed
- *   - Diff Generation: See exactly what changed between ToS versions
- *   - Implicit Consent Detection: Flags "continued use = consent" patterns
- *   - Dispute Packages: Generate evidence reports
+ * v0.4.0 Features:
+ *   - Framework Integrations: beforeConsent hook, n8n nodes, LangGraph checkpoints
+ *   - Agent-to-Agent Agreements: Capture outbound promises, not just inbound ToS
+ *   - PDF Evidence Export: Courtroom-ready evidence documents
+ *   - Custom Rulesets: Define your own risk patterns
+ *   - Decentralized Witness: Hash anchoring to Moltbook/Bitcoin (hybrid)
+ *
+ * Framework Integration:
+ *   const receipts = require('./capture.js');
+ *   receipts.beforeConsent(async (element, ctx) => { ... });
+ *   receipts.capturePromise({ text, counterparty, direction });
  *
  * Environment variables (optional):
  *   RECEIPTS_AGENT_ID - Unique agent identifier
+ *   RECEIPTS_MOLTBOOK_KEY - API key for Moltbook witnessing
+ *   RECEIPTS_CUSTOM_RULES - Path to custom rules file
  */
 
 const crypto = require('crypto');
@@ -37,7 +48,21 @@ const RECEIPTS_DIR = path.join(
 const INDEX_FILE = path.join(RECEIPTS_DIR, 'index.json');
 
 // Version
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
+
+// Custom rules file
+const CUSTOM_RULES_FILE = process.env.RECEIPTS_CUSTOM_RULES ||
+  path.join(RECEIPTS_DIR, 'custom-rules.json');
+
+// Witness anchors directory
+const WITNESS_DIR = path.join(RECEIPTS_DIR, 'witnesses');
+
+// Hook registry for framework integrations
+const hooks = {
+  beforeConsent: [],
+  afterCapture: [],
+  onRiskDetected: [],
+};
 
 // Get command and arguments
 const args = process.argv.slice(2);
@@ -47,6 +72,9 @@ const command = args[0];
 switch (command) {
   case 'capture':
     handleCapture(args.slice(1));
+    break;
+  case 'promise':
+    handlePromise(args.slice(1));
     break;
   case 'query':
     handleQuery(args.slice(1));
@@ -62,6 +90,12 @@ switch (command) {
     break;
   case 'dispute':
     handleDispute(args.slice(1));
+    break;
+  case 'witness':
+    handleWitness(args.slice(1));
+    break;
+  case 'rules':
+    handleRules(args.slice(1));
     break;
   default:
     // Legacy mode: if first arg looks like document text, treat as capture
@@ -471,6 +505,7 @@ function handleList() {
 function handleExport(args) {
   const filters = parseFilters(args);
   const format = filters.format || 'json';
+  const captureId = filters.captureId || filters.id;
   const index = loadIndex();
 
   if (format === 'csv') {
@@ -480,12 +515,38 @@ function handleExport(args) {
     index.forEach(r => {
       const flags = (r.riskFlags || []).join('; ');
       const consentType = r.consentProof?.type || 'unknown';
-      console.log(`"${r.captureId}","${r.merchantName}","${r.sourceUrl}",${r.trustScore},"${r.recommendation}","${consentType}","${flags}","${r.timestamp}",${r.changeDetected || false}`);
+      console.log(`"${r.captureId || r.promiseId}","${r.merchantName || r.counterparty}","${r.sourceUrl || 'N/A'}",${r.trustScore || 'N/A'},"${r.recommendation || r.riskLevel}","${consentType}","${flags}","${r.timestamp}",${r.changeDetected || false}`);
     });
+  } else if (format === 'pdf') {
+    // PDF-ready evidence export (for single capture)
+    if (!captureId) {
+      console.error(JSON.stringify({
+        error: 'PDF export requires --captureId',
+        usage: 'node capture.js export --format=pdf --captureId=local_xxx'
+      }));
+      process.exit(1);
+    }
+
+    const capture = index.find(r => (r.captureId || r.promiseId) === captureId);
+    if (!capture) {
+      console.error(JSON.stringify({ error: 'Capture not found' }));
+      process.exit(1);
+    }
+
+    // Load document text
+    const textFile = path.join(RECEIPTS_DIR, `${captureId}.txt`);
+    let documentText = '';
+    try { documentText = fs.readFileSync(textFile, 'utf8'); } catch (e) {}
+
+    // Generate PDF-ready content
+    const pdfContent = generatePDFContent(capture, documentText);
+    console.log(JSON.stringify(pdfContent, null, 2));
+
   } else {
     // Full JSON export with document text
     const fullExport = index.map(r => {
-      const textFile = path.join(RECEIPTS_DIR, `${r.captureId}.txt`);
+      const id = r.captureId || r.promiseId;
+      const textFile = path.join(RECEIPTS_DIR, `${id}.txt`);
       let documentText = '';
       try {
         documentText = fs.readFileSync(textFile, 'utf8');
@@ -500,41 +561,75 @@ function handleExport(args) {
 
 function showHelp() {
   console.log(`
-RECEIPTS Guard v${VERSION} - Local Agreement Capture
+RECEIPTS Guard v${VERSION} - Local Agreement Capture for Autonomous Agents
 
 "Who controls the evidence becomes who controls the dispute."
 
-Commands:
-  capture "TEXT" "URL" "MERCHANT"  Capture a new agreement
-    --consent-type=TYPE            explicit|implicit|continued_use
-    --element=SELECTOR             DOM element that triggered consent
-    --screenshot=BASE64            Screenshot at time of consent
-    --action=ACTION                Agent action (click_accept, scroll_to_bottom, etc.)
+COMMANDS:
 
-  query [filters]                  Search captured receipts
-    --merchant="Company Name"      Filter by merchant
-    --risk-level=high|medium|low   Filter by risk level
-    --consent-type=TYPE            Filter by consent type
-    --after="2026-01-01"           Filter by date
-    --before="2026-12-31"          Filter by date
+  capture "TEXT" "URL" "MERCHANT"   Capture a ToS/agreement
+    --consent-type=TYPE             explicit|implicit|continued_use
+    --element=SELECTOR              DOM element that triggered consent
+    --screenshot=BASE64             Screenshot at time of consent
 
-  list                             List all receipts
+  promise "TEXT" "COUNTERPARTY"     Capture agent-to-agent commitment
+    --direction=outbound|inbound    Who made the promise (default: outbound)
+    --channel=email|chat|moltbook   Communication channel
 
-  export --format=json|csv         Export all receipts
+  query [filters]                   Search captured receipts
+    --merchant="Company Name"       Filter by merchant
+    --risk-level=high|medium|low    Filter by risk level
+    --after="2026-01-01"            Filter by date
 
-  diff --capture1=ID --capture2=ID Compare two captures
+  list                              List all receipts and promises
 
-  dispute --captureId=ID           Generate dispute evidence package
+  export --format=json|csv|pdf      Export receipts
+    --captureId=ID                  Required for PDF format
 
-Examples:
-  node capture.js capture "Terms..." "https://example.com" "Example Corp" --consent-type=explicit
-  node capture.js diff --capture1=local_abc123 --capture2=local_def456
-  node capture.js dispute --captureId=local_abc123
+  diff --capture1=ID --capture2=ID  Compare two captures
+
+  dispute --captureId=ID            Generate dispute evidence package
+
+  witness --captureId=ID            Create decentralized witness record
+    --anchor=moltbook|bitcoin|both  Where to anchor the hash
+
+  rules --list                      Show all risk detection rules
+  rules --add="PATTERN" --flag="X"  Add custom detection rule
+  rules --import=FILE               Import rules from JSON file
+
+FRAMEWORK INTEGRATION:
+
+  const receipts = require('./capture.js');
+
+  // Hook into consent flow
+  receipts.beforeConsent(async (element, ctx) => {
+    const capture = await receipts.capture({ text, url, merchant });
+    if (capture.recommendation === 'block') return { proceed: false };
+    return { proceed: true };
+  });
+
+  // Capture programmatically
+  const result = await receipts.capture({ text, url, merchant });
+  const promise = await receipts.capturePromise({ text, counterparty });
+
+EXAMPLES:
+
+  node capture.js capture "Terms..." "https://example.com" "Corp" --consent-type=explicit
+  node capture.js promise "I will deliver by Friday" "AgentX" --direction=outbound
+  node capture.js witness --captureId=local_abc123 --anchor=both
+  node capture.js rules --add="crypto.*volatile" --flag="Crypto volatility warning"
+  node capture.js export --format=pdf --captureId=local_abc123
+
+ENVIRONMENT:
+
+  RECEIPTS_AGENT_ID       Your agent identifier
+  RECEIPTS_MOLTBOOK_KEY   API key for Moltbook witnessing
+  RECEIPTS_CUSTOM_RULES   Path to custom rules file
 
 DISCLAIMER: RECEIPTS flags known problematic patterns only. Not a substitute for legal review.
 
 GitHub: https://github.com/lazaruseth/receipts-mvp
-Issues: https://github.com/lazaruseth/receipts-mvp/issues
+Moltbook: https://moltbook.com/u/receipts-guard
 `);
 }
 
@@ -739,4 +834,519 @@ function saveScreenshot(captureId, base64Data) {
     const screenshotFile = path.join(RECEIPTS_DIR, `${captureId}.screenshot`);
     fs.writeFileSync(screenshotFile, base64Data);
   } catch (e) {}
+}
+
+// =============================================================================
+// v0.4.0 FEATURES
+// =============================================================================
+
+// === PROMISE COMMAND (Agent-to-Agent Agreements) ===
+function handlePromise(args) {
+  const filters = parseFilters(args);
+  const positionalArgs = args.filter(a => !a.startsWith('--'));
+  const [commitmentText, counterparty] = positionalArgs;
+
+  if (!commitmentText || !counterparty) {
+    console.error(JSON.stringify({
+      error: 'Missing required arguments',
+      usage: 'node capture.js promise "COMMITMENT_TEXT" "COUNTERPARTY" [--direction=outbound] [--channel=email]'
+    }));
+    process.exit(1);
+  }
+
+  const agentId = process.env.RECEIPTS_AGENT_ID || 'openclaw-agent';
+  const direction = filters.direction || 'outbound';
+  const channel = filters.channel || 'unknown';
+
+  // Create commitment hash
+  const commitmentHash = crypto
+    .createHash('sha256')
+    .update(`${commitmentText}|${counterparty}|${agentId}|${Date.now()}`)
+    .digest('hex');
+
+  // Analyze commitment for risk
+  const riskFlags = detectCommitmentRisks(commitmentText);
+
+  const promise = {
+    promiseId: `promise_${commitmentHash.slice(0, 16)}`,
+    type: 'agent_commitment',
+    direction, // 'outbound' = I promised them, 'inbound' = they promised me
+    commitmentText,
+    counterparty,
+    channel,
+    agentId,
+    timestamp: new Date().toISOString(),
+    commitmentHash,
+    riskFlags,
+    riskLevel: riskFlags.length >= 2 ? 'high' : riskFlags.length === 1 ? 'medium' : 'low',
+    version: VERSION,
+    disclaimer: 'RECEIPTS captures commitments for evidence. Not a substitute for legal review.',
+  };
+
+  console.log(JSON.stringify(promise, null, 2));
+
+  // Save locally
+  savePromise(promise, commitmentText);
+  updateIndex(promise);
+}
+
+function detectCommitmentRisks(text) {
+  const flags = [];
+  const patterns = [
+    { pattern: /unconditional/i, flag: 'Unconditional commitment' },
+    { pattern: /guarantee/i, flag: 'Guarantee language' },
+    { pattern: /by (monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}\/\d{1,2})/i, flag: 'Time-bound commitment' },
+    { pattern: /deliver/i, flag: 'Delivery commitment' },
+    { pattern: /pay|payment|\$\d+/i, flag: 'Financial commitment' },
+    { pattern: /exclusive/i, flag: 'Exclusivity commitment' },
+    { pattern: /permanent|forever|perpetual/i, flag: 'Perpetual commitment' },
+    { pattern: /no matter what|regardless/i, flag: 'Unconditional language' },
+  ];
+
+  for (const { pattern, flag } of patterns) {
+    if (pattern.test(text) && !flags.includes(flag)) {
+      flags.push(flag);
+    }
+  }
+  return flags;
+}
+
+function savePromise(promise, fullText) {
+  try {
+    if (!fs.existsSync(RECEIPTS_DIR)) {
+      fs.mkdirSync(RECEIPTS_DIR, { recursive: true });
+    }
+    const metaFile = path.join(RECEIPTS_DIR, `${promise.promiseId}.json`);
+    fs.writeFileSync(metaFile, JSON.stringify(promise, null, 2));
+    const textFile = path.join(RECEIPTS_DIR, `${promise.promiseId}.txt`);
+    fs.writeFileSync(textFile, fullText);
+  } catch (e) {}
+}
+
+// === WITNESS COMMAND (Decentralized Witnessing) ===
+function handleWitness(args) {
+  const filters = parseFilters(args);
+  const captureId = filters.captureId || filters.id;
+  const anchor = filters.anchor || 'moltbook';
+
+  if (!captureId) {
+    console.error(JSON.stringify({
+      error: 'Missing captureId',
+      usage: 'node capture.js witness --captureId=ID [--anchor=moltbook|bitcoin|both]'
+    }));
+    process.exit(1);
+  }
+
+  const index = loadIndex();
+  const capture = index.find(r => r.captureId === captureId || r.promiseId === captureId);
+
+  if (!capture) {
+    console.error(JSON.stringify({ error: 'Capture not found' }));
+    process.exit(1);
+  }
+
+  // Create witness record
+  const witnessRecord = {
+    witnessId: `witness_${crypto.randomBytes(8).toString('hex')}`,
+    captureId: captureId,
+    documentHash: capture.documentHash || capture.commitmentHash,
+    timestamp: new Date().toISOString(),
+    anchor,
+    status: 'pending',
+    anchors: {},
+  };
+
+  // Handle different anchor types
+  if (anchor === 'moltbook' || anchor === 'both') {
+    const moltbookKey = process.env.RECEIPTS_MOLTBOOK_KEY;
+    if (moltbookKey) {
+      witnessRecord.anchors.moltbook = {
+        status: 'ready',
+        postContent: `📜 WITNESS: Document hash ${capture.documentHash || capture.commitmentHash} captured at ${capture.timestamp}`,
+        instructions: 'POST to Moltbook API to anchor this hash publicly',
+        apiEndpoint: 'https://www.moltbook.com/api/v1/posts',
+      };
+    } else {
+      witnessRecord.anchors.moltbook = {
+        status: 'missing_key',
+        instructions: 'Set RECEIPTS_MOLTBOOK_KEY environment variable to enable Moltbook witnessing',
+      };
+    }
+  }
+
+  if (anchor === 'bitcoin' || anchor === 'both') {
+    witnessRecord.anchors.bitcoin = {
+      status: 'ready',
+      opReturnData: `RECEIPTS:${(capture.documentHash || capture.commitmentHash).slice(0, 40)}`,
+      instructions: 'Use any Bitcoin wallet to create an OP_RETURN transaction with this data',
+      estimatedFee: '~$0.50-2.00 depending on network',
+    };
+  }
+
+  // Save witness record
+  saveWitness(witnessRecord);
+
+  console.log(JSON.stringify(witnessRecord, null, 2));
+}
+
+function saveWitness(witness) {
+  try {
+    if (!fs.existsSync(WITNESS_DIR)) {
+      fs.mkdirSync(WITNESS_DIR, { recursive: true });
+    }
+    const witnessFile = path.join(WITNESS_DIR, `${witness.witnessId}.json`);
+    fs.writeFileSync(witnessFile, JSON.stringify(witness, null, 2));
+  } catch (e) {}
+}
+
+// === RULES COMMAND (Custom Rulesets) ===
+function handleRules(args) {
+  const filters = parseFilters(args);
+
+  if (args.includes('--list') || args.length === 0) {
+    // List all rules (built-in + custom)
+    const customRules = loadCustomRules();
+    console.log(JSON.stringify({
+      builtInRules: getBuiltInRules().length,
+      customRules: customRules.length,
+      rules: {
+        builtIn: getBuiltInRules(),
+        custom: customRules,
+      }
+    }, null, 2));
+    return;
+  }
+
+  if (filters.add && filters.flag) {
+    // Add a new custom rule
+    addCustomRule(filters.add, filters.flag, filters.category || 'custom');
+    console.log(JSON.stringify({
+      success: true,
+      message: `Added custom rule: "${filters.flag}"`,
+      pattern: filters.add,
+    }));
+    return;
+  }
+
+  if (filters.import) {
+    // Import rules from file
+    try {
+      const imported = JSON.parse(fs.readFileSync(filters.import, 'utf8'));
+      const customRules = loadCustomRules();
+      const merged = [...customRules, ...imported];
+      fs.writeFileSync(CUSTOM_RULES_FILE, JSON.stringify(merged, null, 2));
+      console.log(JSON.stringify({
+        success: true,
+        message: `Imported ${imported.length} rules`,
+      }));
+    } catch (e) {
+      console.error(JSON.stringify({ error: 'Failed to import rules', details: e.message }));
+    }
+    return;
+  }
+
+  if (filters.remove) {
+    // Remove a custom rule by flag name
+    const customRules = loadCustomRules();
+    const filtered = customRules.filter(r => r.flag !== filters.remove);
+    fs.writeFileSync(CUSTOM_RULES_FILE, JSON.stringify(filtered, null, 2));
+    console.log(JSON.stringify({
+      success: true,
+      message: `Removed rule: "${filters.remove}"`,
+    }));
+    return;
+  }
+
+  console.error(JSON.stringify({
+    error: 'Invalid rules command',
+    usage: 'node capture.js rules --list | --add="PATTERN" --flag="FLAG" | --import=FILE | --remove="FLAG"'
+  }));
+}
+
+function getBuiltInRules() {
+  return [
+    { pattern: 'binding arbitration', flag: 'Binding arbitration clause', category: 'legal' },
+    { pattern: 'class action waiver', flag: 'Class action waiver', category: 'legal' },
+    { pattern: 'no refund', flag: 'No refund policy', category: 'financial' },
+    { pattern: 'auto-renew', flag: 'Auto-renewal clause', category: 'financial' },
+    { pattern: 'perpetual license', flag: 'Perpetual license grant', category: 'ip' },
+    { pattern: 'sell.*data', flag: 'Data selling clause', category: 'privacy' },
+    { pattern: 'share.*third part', flag: 'Third-party data sharing', category: 'privacy' },
+    { pattern: 'limit.*liability', flag: 'Limited liability clause', category: 'legal' },
+    { pattern: 'indemnif', flag: 'Indemnification clause', category: 'legal' },
+    { pattern: 'terminate.*without.*notice', flag: 'Termination without notice', category: 'terms' },
+  ];
+}
+
+function loadCustomRules() {
+  try {
+    if (fs.existsSync(CUSTOM_RULES_FILE)) {
+      return JSON.parse(fs.readFileSync(CUSTOM_RULES_FILE, 'utf8'));
+    }
+  } catch (e) {}
+  return [];
+}
+
+function addCustomRule(pattern, flag, category) {
+  const customRules = loadCustomRules();
+  customRules.push({ pattern, flag, category, addedAt: new Date().toISOString() });
+
+  if (!fs.existsSync(RECEIPTS_DIR)) {
+    fs.mkdirSync(RECEIPTS_DIR, { recursive: true });
+  }
+  fs.writeFileSync(CUSTOM_RULES_FILE, JSON.stringify(customRules, null, 2));
+}
+
+// Enhanced risk detection with custom rules
+function detectRiskFlagsWithCustom(text) {
+  const flags = detectRiskFlags(text); // Built-in
+  const customRules = loadCustomRules();
+
+  for (const rule of customRules) {
+    try {
+      const regex = new RegExp(rule.pattern, 'i');
+      if (regex.test(text) && !flags.includes(rule.flag)) {
+        flags.push(rule.flag);
+      }
+    } catch (e) {}
+  }
+
+  return flags;
+}
+
+// === PDF EXPORT (Enhanced Export) ===
+// Note: Generates a structured format that can be converted to PDF by external tools
+function generatePDFContent(capture, documentText) {
+  const index = loadIndex();
+  const meta = index.find(r => r.captureId === capture.captureId);
+
+  return {
+    format: 'receipts-evidence-v1',
+    title: `Evidence Package: ${capture.merchantName || capture.counterparty}`,
+    generatedAt: new Date().toISOString(),
+    generatedBy: `RECEIPTS Guard v${VERSION}`,
+
+    header: {
+      caseReference: capture.captureId,
+      documentType: capture.type === 'agent_commitment' ? 'Agent Commitment Record' : 'Terms of Service Capture',
+      captureDate: capture.timestamp,
+    },
+
+    parties: {
+      agent: capture.agentId,
+      counterparty: capture.merchantName || capture.counterparty,
+      direction: capture.direction || 'inbound',
+    },
+
+    documentEvidence: {
+      hash: capture.documentHash || capture.commitmentHash,
+      hashAlgorithm: 'SHA-256',
+      length: documentText?.length || capture.documentLength,
+      preview: documentText?.substring(0, 500) || '[Document text not available]',
+    },
+
+    consentEvidence: capture.consentProof ? {
+      type: capture.consentProof.type,
+      capturedAt: capture.consentProof.capturedAt,
+      method: capture.consentProof.agentAction,
+      elementSelector: capture.consentProof.elementSelector,
+      hasScreenshot: !!capture.consentProof.screenshotHash,
+    } : null,
+
+    riskAnalysis: {
+      trustScore: capture.trustScore,
+      recommendation: capture.recommendation,
+      flags: capture.riskFlags?.map(flag => ({
+        flag,
+        implication: getRiskImplication(flag),
+      })) || [],
+    },
+
+    changeHistory: capture.changeDetected ? {
+      detected: true,
+      previousCapture: capture.previousCapture,
+      note: capture.changeNote,
+    } : { detected: false },
+
+    legalDisclaimer: `This document was generated by RECEIPTS Guard v${VERSION}, an automated agreement capture tool. ` +
+      'It records what terms existed at the time of capture and how consent was documented. ' +
+      'This is NOT legal advice. The patterns flagged are based on automated detection and may not capture all relevant clauses. ' +
+      'Consult with a qualified attorney for legal interpretation and dispute resolution.',
+
+    exportInstructions: {
+      toPDF: 'Use a JSON-to-PDF converter or import into your document system',
+      forCourt: 'Print this document and have it notarized alongside the full agreement text',
+      forMediation: 'Share this structured data with the mediator as evidence of agreement terms',
+    },
+  };
+}
+
+// === FRAMEWORK INTEGRATION API ===
+
+/**
+ * Register a beforeConsent hook
+ * Called before any agreement is captured, can block or modify
+ *
+ * Usage:
+ *   const receipts = require('./capture.js');
+ *   receipts.beforeConsent(async (element, ctx) => {
+ *     const capture = await receipts.capture({ text: element.innerText, ... });
+ *     if (capture.recommendation === 'block') {
+ *       return { proceed: false, reason: capture.summary };
+ *     }
+ *     return { proceed: true };
+ *   });
+ */
+function beforeConsent(handler) {
+  hooks.beforeConsent.push(handler);
+}
+
+/**
+ * Register an afterCapture hook
+ * Called after every successful capture
+ */
+function afterCapture(handler) {
+  hooks.afterCapture.push(handler);
+}
+
+/**
+ * Register an onRiskDetected hook
+ * Called when high-risk patterns are found
+ */
+function onRiskDetected(handler) {
+  hooks.onRiskDetected.push(handler);
+}
+
+/**
+ * Programmatic capture (for framework integration)
+ */
+async function captureAgreement(options) {
+  const { text, url, merchant, consentType, element, screenshot, action } = options;
+
+  // Run beforeConsent hooks
+  for (const hook of hooks.beforeConsent) {
+    try {
+      const result = await hook({ text, url, merchant }, { element });
+      if (result && result.proceed === false) {
+        return { blocked: true, reason: result.reason };
+      }
+    } catch (e) {}
+  }
+
+  const agentId = process.env.RECEIPTS_AGENT_ID || 'openclaw-agent';
+  const documentHash = crypto.createHash('sha256').update(text).digest('hex');
+
+  // Check for duplicates
+  const duplicate = checkDuplicate(documentHash);
+  if (duplicate) {
+    return { ...duplicate, isDuplicate: true };
+  }
+
+  // Analyze
+  const riskFlags = detectRiskFlagsWithCustom(text);
+  const consentFlags = detectConsentType(text);
+  const allFlags = [...riskFlags, ...consentFlags];
+  const trustScore = Math.max(0, 100 - (allFlags.length * 15));
+  const recommendation = getRecommendation(allFlags, consentFlags);
+
+  const capture = {
+    captureId: `local_${documentHash.slice(0, 16)}`,
+    recommendation,
+    trustScore,
+    riskFlags: allFlags,
+    summary: generateSummary(allFlags, trustScore, consentType || detectImplicitConsentType(text)),
+    documentHash,
+    sourceUrl: url || 'unknown',
+    merchantName: merchant || 'Unknown Merchant',
+    agentId,
+    timestamp: new Date().toISOString(),
+    documentLength: text.length,
+    version: VERSION,
+    consentProof: {
+      type: consentType || detectImplicitConsentType(text),
+      capturedAt: new Date().toISOString(),
+      elementSelector: element || null,
+      screenshotHash: screenshot ? crypto.createHash('sha256').update(screenshot).digest('hex') : null,
+      agentAction: action || 'programmatic_capture',
+    },
+    disclaimer: 'RECEIPTS flags known problematic patterns only. Not a substitute for legal review.',
+  };
+
+  // Save
+  saveLocalReceipt(capture, text);
+  updateIndex(capture);
+
+  // Run afterCapture hooks
+  for (const hook of hooks.afterCapture) {
+    try { await hook(capture); } catch (e) {}
+  }
+
+  // Run onRiskDetected hooks if high risk
+  if (recommendation === 'block' || allFlags.length >= 2) {
+    for (const hook of hooks.onRiskDetected) {
+      try { await hook(capture, allFlags); } catch (e) {}
+    }
+  }
+
+  return capture;
+}
+
+/**
+ * Programmatic promise capture (for agent-to-agent)
+ */
+async function capturePromise(options) {
+  const { text, counterparty, direction, channel } = options;
+  const agentId = process.env.RECEIPTS_AGENT_ID || 'openclaw-agent';
+
+  const commitmentHash = crypto
+    .createHash('sha256')
+    .update(`${text}|${counterparty}|${agentId}|${Date.now()}`)
+    .digest('hex');
+
+  const riskFlags = detectCommitmentRisks(text);
+
+  const promise = {
+    promiseId: `promise_${commitmentHash.slice(0, 16)}`,
+    type: 'agent_commitment',
+    direction: direction || 'outbound',
+    commitmentText: text,
+    counterparty,
+    channel: channel || 'api',
+    agentId,
+    timestamp: new Date().toISOString(),
+    commitmentHash,
+    riskFlags,
+    riskLevel: riskFlags.length >= 2 ? 'high' : riskFlags.length === 1 ? 'medium' : 'low',
+    version: VERSION,
+  };
+
+  savePromise(promise, text);
+  updateIndex(promise);
+
+  return promise;
+}
+
+// === EXPORT MODULE API ===
+// When required as a module, export the programmatic API
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    // Hooks
+    beforeConsent,
+    afterCapture,
+    onRiskDetected,
+
+    // Programmatic capture
+    capture: captureAgreement,
+    capturePromise,
+
+    // Utilities
+    detectRiskFlags: detectRiskFlagsWithCustom,
+    detectConsentType,
+    loadIndex,
+    generatePDFContent,
+
+    // Constants
+    VERSION,
+    RECEIPTS_DIR,
+  };
 }
