@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * RECEIPTS Guard v0.5.0 - Arbitration Protocol for Autonomous Agents
+ * RECEIPTS Guard v0.6.0 - Self-Sovereign Agent Identity
  *
  * "Who controls the evidence becomes who controls the dispute."
  *
@@ -10,6 +10,17 @@
  * Commands:
  *   capture "TERMS_TEXT" "SOURCE_URL" "MERCHANT_NAME" [--consent-type=TYPE]
  *   promise "COMMITMENT_TEXT" "COUNTERPARTY" [--direction=inbound|outbound]
+ *
+ *   === IDENTITY (v0.6.0) ===
+ *   identity init --namespace=X --name=Y [--controller-twitter=@handle]
+ *   identity show [--full]
+ *   identity rotate [--reason=scheduled|compromise|device_change]
+ *   identity verify --did=DID | --signature=SIG --termsHash=HASH
+ *   identity set-controller --twitter=@handle
+ *   identity verify-controller --url=URL
+ *   identity recover --controller-proof=URL [--confirm]
+ *   identity publish [--platform=moltbook|ipfs|local]
+ *   migrate --to-did
  *
  *   === ARBITRATION PROTOCOL (v0.5.0) ===
  *   propose "TERMS" "COUNTERPARTY" --arbiter="AGENT" [--deadline=ISO_DATE] [--value=AMOUNT]
@@ -29,6 +40,13 @@
  *   dispute --captureId=ID
  *   witness --captureId=ID [--anchor=moltbook|bitcoin|both]
  *   rules --list | --add="PATTERN" --flag="FLAG_NAME"
+ *
+ * v0.5.0 Features:
+ * v0.6.0 Features:
+ *   - Self-Sovereign Identity: DID-based agent identity with Ed25519 signatures
+ *   - Key Rotation: Old key signs new key, creating unbroken proof chain
+ *   - Human Controller: Twitter-based recovery backstop
+ *   - Backward Compatible: Legacy HMAC signatures still supported
  *
  * v0.5.0 Features:
  *   - Full Arbitration Protocol: propose → accept → fulfill/arbitrate → ruling
@@ -58,13 +76,28 @@ const RECEIPTS_DIR = path.join(
 const INDEX_FILE = path.join(RECEIPTS_DIR, 'index.json');
 
 // Version
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 
 // Arbitration directories
 const PROPOSALS_DIR = path.join(RECEIPTS_DIR, 'proposals');
 const AGREEMENTS_DIR = path.join(RECEIPTS_DIR, 'agreements');
 const ARBITRATIONS_DIR = path.join(RECEIPTS_DIR, 'arbitrations');
 const RULINGS_DIR = path.join(RECEIPTS_DIR, 'rulings');
+
+// Identity directories (v0.6.0)
+const IDENTITY_DIR = path.join(RECEIPTS_DIR, 'identity');
+const PRIVATE_KEY_DIR = path.join(IDENTITY_DIR, 'private');
+const KEY_ARCHIVE_DIR = path.join(PRIVATE_KEY_DIR, 'key-archive');
+const DID_FILE = path.join(IDENTITY_DIR, 'did.json');
+const KEY_HISTORY_FILE = path.join(IDENTITY_DIR, 'key-history.json');
+const CONTROLLER_FILE = path.join(IDENTITY_DIR, 'controller.json');
+const RECOVERY_DIR = path.join(IDENTITY_DIR, 'recovery');
+
+// DID Method
+const DID_METHOD = 'agent';
+
+// Base58btc alphabet (Bitcoin) for multibase encoding
+const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 
 // Valid arbitration reasons
 const VALID_ARBITRATION_REASONS = [
@@ -147,6 +180,13 @@ switch (command) {
     break;
   case 'timeline':
     handleTimeline(args.slice(1));
+    break;
+  // === IDENTITY v0.6.0 ===
+  case 'identity':
+    handleIdentity(args.slice(1));
+    break;
+  case 'migrate':
+    handleMigrate(args.slice(1));
     break;
   default:
     // Legacy mode: if first arg looks like document text, treat as capture
@@ -704,9 +744,38 @@ function handleExport(args) {
 
 function showHelp() {
   console.log(`
-RECEIPTS Guard v${VERSION} - Arbitration Protocol for Autonomous Agents
+RECEIPTS Guard v${VERSION} - Self-Sovereign Agent Identity
 
-"Who controls the evidence becomes who controls the dispute."
+"Identity isn't metaphysical. It's functional."
+
+═══════════════════════════════════════════════════════════════════════════════
+IDENTITY (v0.6.0)
+═══════════════════════════════════════════════════════════════════════════════
+
+  identity init                       Create identity with Ed25519 keypair
+    --namespace=NAMESPACE             Your namespace (e.g., remaster_io)
+    --name=NAME                       Agent name
+    --controller-twitter=@HANDLE      Human controller for recovery
+
+  identity show [--full]              Display identity summary or full DID
+
+  identity rotate                     Rotate keys (old signs new)
+    --reason=REASON                   scheduled|compromise|device_change
+
+  identity verify                     Verify DID or signature
+    --did=DID                         Verify DID key chain
+    --signature=SIG --termsHash=HASH  Verify signature
+
+  identity set-controller             Set human controller
+    --twitter=@HANDLE
+
+  identity recover                    Recover using human controller
+    --controller-proof=URL --confirm
+
+  identity publish                    Publish DID document
+    --platform=moltbook|ipfs|local
+
+  migrate --to-did                    Migrate existing agreements to DID
 
 ═══════════════════════════════════════════════════════════════════════════════
 ARBITRATION PROTOCOL (v0.5.0)
@@ -832,9 +901,16 @@ Moltbook: https://moltbook.com/u/receipts-guard
 function parseFilters(args) {
   const filters = {};
   args.forEach(arg => {
-    const match = arg.match(/^--(\w+[-\w]*)=(.+)$/);
-    if (match) {
-      filters[match[1]] = match[2].replace(/^["']|["']$/g, '');
+    // Handle --key=value format
+    const matchWithValue = arg.match(/^--(\w+[-\w]*)=(.+)$/);
+    if (matchWithValue) {
+      filters[matchWithValue[1]] = matchWithValue[2].replace(/^["']|["']$/g, '');
+      return;
+    }
+    // Handle --flag format (boolean true)
+    const matchFlag = arg.match(/^--(\w+[-\w]*)$/);
+    if (matchFlag) {
+      filters[matchFlag[1]] = true;
     }
   });
   return filters;
@@ -1053,10 +1129,21 @@ function generateTermsHash(terms, parties, deadline) {
 }
 
 /**
- * Sign terms with agent identity (simplified - uses HMAC with agent ID as key)
- * In production, this would use proper cryptographic signatures
+ * Sign terms with agent identity
+ * Uses Ed25519 if DID identity exists, falls back to legacy HMAC
  */
 function signTerms(termsHash, agentId) {
+  // Check if we have a DID identity with private key
+  const didDocument = loadLocalDID();
+  const privateKeyData = loadPrivateKey();
+
+  if (didDocument && privateKeyData) {
+    // Use Ed25519 signature
+    const privateKeyDer = Buffer.from(privateKeyData.privateKey, 'base64');
+    return signTermsWithDID(termsHash, privateKeyDer);
+  }
+
+  // Legacy fallback - HMAC signature
   const timestamp = Date.now();
   const signature = crypto
     .createHmac('sha256', agentId)
@@ -1066,18 +1153,48 @@ function signTerms(termsHash, agentId) {
 }
 
 /**
- * Verify a signature (simplified verification)
+ * Verify a signature
+ * Supports both Ed25519 (ed25519:) and legacy HMAC (sig:) formats
  */
-function verifySignature(termsHash, signature, agentId) {
-  if (!signature || !signature.startsWith('sig:')) return false;
-  const parts = signature.split(':');
-  if (parts.length !== 3) return false;
-  const [, sigHash, timestamp] = parts;
-  const expected = crypto
-    .createHmac('sha256', agentId)
-    .update(`${termsHash}|${timestamp}`)
-    .digest('hex');
-  return expected.slice(0, 32) === sigHash;
+function verifySignature(termsHash, signature, agentIdOrDID) {
+  if (!signature) return false;
+
+  // Handle Ed25519 signatures
+  if (signature.startsWith('ed25519:')) {
+    // Try to resolve DID document
+    let didDocument = null;
+
+    if (agentIdOrDID.startsWith('did:')) {
+      didDocument = resolveDID(agentIdOrDID);
+    } else {
+      // Try local DID
+      didDocument = loadLocalDID();
+    }
+
+    if (!didDocument) return false;
+
+    const result = verifySignatureWithDID(termsHash, signature, didDocument);
+    return result.valid;
+  }
+
+  // Handle legacy HMAC signatures
+  if (signature.startsWith('sig:')) {
+    // Extract legacy agent ID from DID if needed
+    const legacyId = agentIdOrDID.startsWith('did:')
+      ? agentIdOrDID.split(':').pop()
+      : agentIdOrDID;
+
+    const parts = signature.split(':');
+    if (parts.length !== 3) return false;
+    const [, sigHash, timestamp] = parts;
+    const expected = crypto
+      .createHmac('sha256', legacyId)
+      .update(`${termsHash}|${timestamp}`)
+      .digest('hex');
+    return expected.slice(0, 32) === sigHash;
+  }
+
+  return false;
 }
 
 /**
@@ -2310,6 +2427,1138 @@ async function capturePromise(options) {
   return promise;
 }
 
+// === IDENTITY MODULE v0.6.0 ===
+// Self-Sovereign Agent Identity with Ed25519 signatures
+
+/**
+ * Encode buffer to base58btc
+ */
+function base58btcEncode(buffer) {
+  if (buffer.length === 0) return '';
+
+  // Convert to BigInt
+  let num = BigInt('0x' + buffer.toString('hex'));
+  let encoded = '';
+
+  while (num > 0n) {
+    encoded = BASE58_ALPHABET[Number(num % 58n)] + encoded;
+    num = num / 58n;
+  }
+
+  // Handle leading zeros
+  for (let i = 0; i < buffer.length && buffer[i] === 0; i++) {
+    encoded = '1' + encoded;
+  }
+
+  return encoded;
+}
+
+/**
+ * Decode base58btc to buffer
+ */
+function base58btcDecode(str) {
+  if (str.length === 0) return Buffer.alloc(0);
+
+  let num = 0n;
+  for (const char of str) {
+    const index = BASE58_ALPHABET.indexOf(char);
+    if (index === -1) throw new Error(`Invalid base58 character: ${char}`);
+    num = num * 58n + BigInt(index);
+  }
+
+  // Convert to hex and then buffer
+  let hex = num.toString(16);
+  if (hex.length % 2) hex = '0' + hex;
+
+  // Handle leading zeros (leading '1's in base58)
+  let leadingZeros = 0;
+  for (const char of str) {
+    if (char === '1') leadingZeros++;
+    else break;
+  }
+
+  const buffer = Buffer.from(hex, 'hex');
+  if (leadingZeros > 0) {
+    return Buffer.concat([Buffer.alloc(leadingZeros), buffer]);
+  }
+  return buffer;
+}
+
+/**
+ * Generate Ed25519 keypair
+ */
+function generateEd25519Keypair() {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519', {
+    publicKeyEncoding: { type: 'spki', format: 'der' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'der' }
+  });
+
+  // Multibase format: z prefix = base58btc
+  const publicKeyMultibase = 'z' + base58btcEncode(publicKey);
+  const keyId = `#key-${Date.now()}`;
+
+  return {
+    publicKey,
+    privateKey,
+    publicKeyMultibase,
+    keyId,
+    createdAt: new Date().toISOString()
+  };
+}
+
+/**
+ * Generate DID document with fresh keypair
+ */
+function generateDIDDocument(namespace, identifier, controllerConfig) {
+  const keypair = generateEd25519Keypair();
+  const did = `did:${DID_METHOD}:${namespace}:${identifier}`;
+
+  const document = {
+    "@context": [
+      "https://www.w3.org/ns/did/v1",
+      "https://receipts.remaster.xyz/did/v1"
+    ],
+    id: did,
+
+    verificationMethod: [{
+      id: `${did}${keypair.keyId}`,
+      type: "Ed25519VerificationKey2020",
+      controller: did,
+      publicKeyMultibase: keypair.publicKeyMultibase
+    }],
+
+    authentication: [`${did}${keypair.keyId}`],
+    assertionMethod: [`${did}${keypair.keyId}`],
+
+    keyHistory: [{
+      keyId: keypair.keyId,
+      activatedAt: keypair.createdAt,
+      rotatedAt: null,
+      rotationProof: null,
+      publicKeyMultibase: keypair.publicKeyMultibase
+    }],
+
+    controller: controllerConfig || null,
+
+    service: [{
+      id: `${did}#receipts`,
+      type: "RECEIPTSGuard",
+      serviceEndpoint: `local://${RECEIPTS_DIR}`,
+      version: VERSION
+    }],
+
+    created: keypair.createdAt,
+    updated: keypair.createdAt
+  };
+
+  return { document, keypair };
+}
+
+/**
+ * Load local DID document
+ */
+function loadLocalDID() {
+  if (!fs.existsSync(DID_FILE)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(DID_FILE, 'utf8'));
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Load current private key
+ */
+function loadPrivateKey() {
+  const keyFile = path.join(PRIVATE_KEY_DIR, 'key-current.json');
+  if (!fs.existsSync(keyFile)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(keyFile, 'utf8'));
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Sign terms with Ed25519 private key
+ */
+function signTermsWithDID(termsHash, privateKeyDer) {
+  const timestamp = Date.now();
+  const message = Buffer.from(`${termsHash}|${timestamp}`);
+
+  const privateKey = crypto.createPrivateKey({
+    key: privateKeyDer,
+    format: 'der',
+    type: 'pkcs8'
+  });
+
+  const signature = crypto.sign(null, message, privateKey);
+  const signatureBase64 = signature.toString('base64url');
+
+  return `ed25519:${signatureBase64}:${timestamp}`;
+}
+
+/**
+ * Verify Ed25519 signature against DID document
+ */
+function verifySignatureWithDID(termsHash, signature, didDocument) {
+  if (!signature || !didDocument) {
+    return { valid: false, error: 'Missing signature or DID document' };
+  }
+
+  // Parse signature
+  const parts = signature.split(':');
+  if (parts.length !== 3 || parts[0] !== 'ed25519') {
+    return { valid: false, error: 'Invalid Ed25519 signature format' };
+  }
+
+  const [, signatureBase64, timestamp] = parts;
+  const message = Buffer.from(`${termsHash}|${timestamp}`);
+  const signatureBuffer = Buffer.from(signatureBase64, 'base64url');
+
+  // Get public key from DID document (try current key first)
+  const verificationMethod = didDocument.verificationMethod[0];
+  if (!verificationMethod) {
+    return { valid: false, error: 'No verification method in DID document' };
+  }
+
+  try {
+    const publicKeyDer = base58btcDecode(
+      verificationMethod.publicKeyMultibase.slice(1) // Remove 'z' prefix
+    );
+
+    const publicKey = crypto.createPublicKey({
+      key: publicKeyDer,
+      format: 'der',
+      type: 'spki'
+    });
+
+    const valid = crypto.verify(null, message, publicKey, signatureBuffer);
+    return {
+      valid,
+      timestamp: parseInt(timestamp),
+      keyId: verificationMethod.id
+    };
+  } catch (e) {
+    return { valid: false, error: e.message };
+  }
+}
+
+/**
+ * Verify signature with key history (for old signatures after rotation)
+ */
+function verifySignatureWithHistory(termsHash, signature, didDocument, signatureTimestamp) {
+  // First try current key
+  const result = verifySignatureWithDID(termsHash, signature, didDocument);
+  if (result.valid) return result;
+
+  // Find key that was active at signature time
+  const sigTime = new Date(signatureTimestamp);
+
+  for (const keyEntry of didDocument.keyHistory) {
+    const activatedAt = new Date(keyEntry.activatedAt);
+    const rotatedAt = keyEntry.rotatedAt ? new Date(keyEntry.rotatedAt) : null;
+
+    // Check if this key was active at signature time
+    if (sigTime >= activatedAt && (!rotatedAt || sigTime < rotatedAt)) {
+      // Find verification method for this key
+      const vm = didDocument.verificationMethod.find(
+        v => v.id.endsWith(keyEntry.keyId)
+      );
+
+      if (vm) {
+        try {
+          const publicKeyDer = base58btcDecode(vm.publicKeyMultibase.slice(1));
+          const publicKey = crypto.createPublicKey({
+            key: publicKeyDer,
+            format: 'der',
+            type: 'spki'
+          });
+
+          const parts = signature.split(':');
+          const signatureBuffer = Buffer.from(parts[1], 'base64url');
+          const message = Buffer.from(`${termsHash}|${parts[2]}`);
+
+          const valid = crypto.verify(null, message, publicKey, signatureBuffer);
+          if (valid) {
+            return { valid: true, timestamp: parseInt(parts[2]), keyId: vm.id, historical: true };
+          }
+        } catch (e) {
+          // Continue to next key
+        }
+      }
+    }
+  }
+
+  return { valid: false, error: 'No valid key found for signature timestamp' };
+}
+
+/**
+ * Resolve DID (local only for now)
+ */
+function resolveDID(didId) {
+  // For local DIDs, check if it matches our identity
+  const localDID = loadLocalDID();
+  if (localDID && localDID.id === didId) {
+    return localDID;
+  }
+
+  // Future: resolve from network/registry
+  return null;
+}
+
+// === IDENTITY CLI COMMANDS ===
+
+/**
+ * Identity command router
+ */
+function handleIdentity(args) {
+  const subCommand = args[0];
+
+  switch (subCommand) {
+    case 'init':
+      handleIdentityInit(args.slice(1));
+      break;
+    case 'show':
+      handleIdentityShow(args.slice(1));
+      break;
+    case 'rotate':
+      handleIdentityRotate(args.slice(1));
+      break;
+    case 'verify':
+      handleIdentityVerify(args.slice(1));
+      break;
+    case 'set-controller':
+      handleIdentitySetController(args.slice(1));
+      break;
+    case 'verify-controller':
+      handleIdentityVerifyController(args.slice(1));
+      break;
+    case 'recover':
+      handleIdentityRecover(args.slice(1));
+      break;
+    case 'publish':
+      handleIdentityPublish(args.slice(1));
+      break;
+    case 'export':
+      handleIdentityExport(args.slice(1));
+      break;
+    default:
+      showIdentityHelp();
+  }
+}
+
+/**
+ * Initialize identity
+ */
+function handleIdentityInit(args) {
+  const filters = parseFilters(args);
+
+  // Check if identity already exists
+  if (fs.existsSync(DID_FILE)) {
+    const existingDID = loadLocalDID();
+    console.log(JSON.stringify({
+      error: 'Identity already exists',
+      did: existingDID?.id,
+      hint: 'Use "identity rotate" to rotate keys or "identity show" to view',
+    }, null, 2));
+    process.exit(1);
+  }
+
+  // Get configuration
+  const namespace = filters.namespace ||
+    process.env.RECEIPTS_NAMESPACE ||
+    'local';
+  const identifier = filters.name ||
+    process.env.RECEIPTS_AGENT_ID ||
+    `agent-${crypto.randomBytes(4).toString('hex')}`;
+
+  // Controller configuration
+  let controllerConfig = null;
+  if (filters['controller-twitter']) {
+    controllerConfig = {
+      type: 'human',
+      platform: 'twitter',
+      handle: filters['controller-twitter'],
+      verificationUrl: null,
+      linkedAt: new Date().toISOString()
+    };
+  }
+
+  // Generate DID document and keypair
+  const { document, keypair } = generateDIDDocument(
+    namespace,
+    identifier,
+    controllerConfig
+  );
+
+  // Create directory structure
+  ensureDir(IDENTITY_DIR);
+  ensureDir(PRIVATE_KEY_DIR);
+  ensureDir(KEY_ARCHIVE_DIR);
+  ensureDir(RECOVERY_DIR);
+
+  // Save DID document (public)
+  fs.writeFileSync(DID_FILE, JSON.stringify(document, null, 2));
+
+  // Save private key with restricted permissions
+  const privateKeyData = {
+    keyId: keypair.keyId,
+    privateKey: keypair.privateKey.toString('base64'),
+    publicKeyMultibase: keypair.publicKeyMultibase,
+    createdAt: keypair.createdAt,
+    encrypted: false
+  };
+
+  const keyFilePath = path.join(PRIVATE_KEY_DIR, 'key-current.json');
+  fs.writeFileSync(keyFilePath, JSON.stringify(privateKeyData, null, 2));
+  try {
+    fs.chmodSync(keyFilePath, 0o600); // Owner read/write only
+  } catch (e) {
+    // Windows doesn't support chmod, continue anyway
+  }
+
+  // Initialize key history
+  fs.writeFileSync(KEY_HISTORY_FILE, JSON.stringify({
+    did: document.id,
+    keys: document.keyHistory,
+    rotations: []
+  }, null, 2));
+
+  // Save controller config
+  if (controllerConfig) {
+    fs.writeFileSync(CONTROLLER_FILE, JSON.stringify(controllerConfig, null, 2));
+  }
+
+  console.log(JSON.stringify({
+    success: true,
+    did: document.id,
+    keyId: keypair.keyId,
+    publicKeyMultibase: keypair.publicKeyMultibase,
+    controller: controllerConfig,
+    message: 'Identity initialized successfully',
+    nextSteps: controllerConfig
+      ? [
+          `Verify controller: Post your DID to ${controllerConfig.platform}`,
+          `Publish identity: node capture.js identity publish`
+        ]
+      : [
+          'Add a human controller: node capture.js identity set-controller --twitter=@handle',
+          'Publish identity: node capture.js identity publish'
+        ],
+    version: VERSION
+  }, null, 2));
+}
+
+/**
+ * Show identity
+ */
+function handleIdentityShow(args) {
+  const filters = parseFilters(args);
+  const full = filters.full === true || filters.full === 'true';
+
+  const didDocument = loadLocalDID();
+  if (!didDocument) {
+    console.log(JSON.stringify({
+      error: 'No identity found',
+      hint: 'Run "identity init" to create one'
+    }, null, 2));
+    process.exit(1);
+  }
+
+  if (full) {
+    // Show full DID document
+    console.log(JSON.stringify(didDocument, null, 2));
+  } else {
+    // Show summary
+    const keyHistory = didDocument.keyHistory || [];
+    const currentKeyId = didDocument.authentication?.[0]?.split('#')[1] || keyHistory[0]?.keyId;
+
+    console.log(JSON.stringify({
+      did: didDocument.id,
+      currentKeyId: currentKeyId,
+      publicKeyMultibase: didDocument.verificationMethod?.[0]?.publicKeyMultibase?.slice(0, 30) + '...',
+      controller: didDocument.controller,
+      keyRotations: keyHistory.filter(k => k.rotatedAt).length,
+      created: didDocument.created,
+      updated: didDocument.updated,
+      version: VERSION
+    }, null, 2));
+  }
+}
+
+/**
+ * Rotate keys
+ */
+function handleIdentityRotate(args) {
+  const filters = parseFilters(args);
+  const reason = filters.reason || 'scheduled_rotation';
+
+  // Load current identity
+  const didDocument = loadLocalDID();
+  if (!didDocument) {
+    console.error(JSON.stringify({
+      error: 'No identity found',
+      hint: 'Run "identity init" first'
+    }));
+    process.exit(1);
+  }
+
+  const currentKeyData = loadPrivateKey();
+  if (!currentKeyData) {
+    console.error(JSON.stringify({
+      error: 'No private key found',
+      hint: 'Identity may be corrupted. Consider recovery.'
+    }));
+    process.exit(1);
+  }
+
+  // Generate new keypair
+  const newKeypair = generateEd25519Keypair();
+
+  // Create rotation proof (old key signs new key)
+  const rotationData = {
+    previousKeyId: currentKeyData.keyId,
+    newKeyId: newKeypair.keyId,
+    newPublicKeyMultibase: newKeypair.publicKeyMultibase,
+    reason,
+    rotatedAt: new Date().toISOString()
+  };
+
+  const rotationMessage = Buffer.from(JSON.stringify(rotationData));
+  const oldPrivateKey = crypto.createPrivateKey({
+    key: Buffer.from(currentKeyData.privateKey, 'base64'),
+    format: 'der',
+    type: 'pkcs8'
+  });
+
+  const rotationSignature = crypto.sign(null, rotationMessage, oldPrivateKey);
+  const rotationProof = {
+    ...rotationData,
+    proof: {
+      type: 'Ed25519Signature2020',
+      created: rotationData.rotatedAt,
+      verificationMethod: `${didDocument.id}${currentKeyData.keyId}`,
+      proofValue: rotationSignature.toString('base64url')
+    }
+  };
+
+  // Archive old key
+  fs.writeFileSync(
+    path.join(KEY_ARCHIVE_DIR, `${currentKeyData.keyId.replace('#', '')}.json`),
+    JSON.stringify({
+      ...currentKeyData,
+      archivedAt: rotationData.rotatedAt,
+      rotatedTo: newKeypair.keyId
+    }, null, 2)
+  );
+
+  // Update DID document
+  const newVerificationMethod = {
+    id: `${didDocument.id}${newKeypair.keyId}`,
+    type: "Ed25519VerificationKey2020",
+    controller: didDocument.id,
+    publicKeyMultibase: newKeypair.publicKeyMultibase
+  };
+
+  // Keep old keys for signature verification, prepend new key
+  didDocument.verificationMethod.unshift(newVerificationMethod);
+  didDocument.authentication = [`${didDocument.id}${newKeypair.keyId}`];
+  didDocument.assertionMethod = [`${didDocument.id}${newKeypair.keyId}`];
+
+  // Update key history
+  const oldKeyEntry = didDocument.keyHistory.find(k => k.keyId === currentKeyData.keyId);
+  if (oldKeyEntry) {
+    oldKeyEntry.rotatedAt = rotationData.rotatedAt;
+    oldKeyEntry.rotationProof = rotationProof.proof.proofValue;
+  }
+
+  didDocument.keyHistory.unshift({
+    keyId: newKeypair.keyId,
+    activatedAt: rotationData.rotatedAt,
+    rotatedAt: null,
+    rotationProof: null,
+    publicKeyMultibase: newKeypair.publicKeyMultibase,
+    previousKeyId: currentKeyData.keyId
+  });
+
+  didDocument.updated = rotationData.rotatedAt;
+
+  // Save updates
+  fs.writeFileSync(DID_FILE, JSON.stringify(didDocument, null, 2));
+
+  const newKeyData = {
+    keyId: newKeypair.keyId,
+    privateKey: newKeypair.privateKey.toString('base64'),
+    publicKeyMultibase: newKeypair.publicKeyMultibase,
+    createdAt: newKeypair.createdAt,
+    encrypted: false
+  };
+
+  const keyFilePath = path.join(PRIVATE_KEY_DIR, 'key-current.json');
+  fs.writeFileSync(keyFilePath, JSON.stringify(newKeyData, null, 2));
+  try {
+    fs.chmodSync(keyFilePath, 0o600);
+  } catch (e) {}
+
+  // Update key history file
+  const keyHistoryFile = fs.existsSync(KEY_HISTORY_FILE)
+    ? JSON.parse(fs.readFileSync(KEY_HISTORY_FILE, 'utf8'))
+    : { did: didDocument.id, keys: [], rotations: [] };
+  keyHistoryFile.keys = didDocument.keyHistory;
+  keyHistoryFile.rotations.push(rotationProof);
+  fs.writeFileSync(KEY_HISTORY_FILE, JSON.stringify(keyHistoryFile, null, 2));
+
+  console.log(JSON.stringify({
+    success: true,
+    did: didDocument.id,
+    previousKeyId: currentKeyData.keyId,
+    newKeyId: newKeypair.keyId,
+    reason,
+    rotationProof: rotationProof.proof,
+    message: 'Key rotated successfully. Old key archived for signature verification.',
+    chainIntegrity: 'verified',
+    version: VERSION
+  }, null, 2));
+}
+
+/**
+ * Verify identity or signature
+ */
+function handleIdentityVerify(args) {
+  const filters = parseFilters(args);
+
+  // Signature verification takes priority if provided
+  if (filters.signature && filters.termsHash) {
+    // Verify a signature
+    const termsHash = filters.termsHash.replace('sha256:', '');
+    const didId = filters.did;
+
+    let didDocument;
+    if (didId) {
+      didDocument = resolveDID(didId);
+    } else {
+      didDocument = loadLocalDID();
+    }
+
+    if (!didDocument) {
+      console.error(JSON.stringify({ error: 'Could not resolve DID document' }));
+      process.exit(1);
+    }
+
+    // Check signature format
+    if (filters.signature.startsWith('ed25519:')) {
+      const result = verifySignatureWithDID(termsHash, filters.signature, didDocument);
+      console.log(JSON.stringify({
+        ...result,
+        did: didDocument.id,
+        termsHash: filters.termsHash,
+        signatureType: 'ed25519'
+      }, null, 2));
+    } else if (filters.signature.startsWith('sig:')) {
+      // Legacy signature
+      const legacyId = didDocument.id.split(':').pop();
+      const valid = verifySignature(termsHash, filters.signature, legacyId);
+      console.log(JSON.stringify({
+        valid,
+        did: didDocument.id,
+        termsHash: filters.termsHash,
+        signatureType: 'legacy_hmac'
+      }, null, 2));
+    } else {
+      console.error(JSON.stringify({ error: 'Unknown signature format' }));
+      process.exit(1);
+    }
+    return;
+  }
+
+  // DID verification (when no signature provided)
+  if (filters.did) {
+    const didDocument = resolveDID(filters.did);
+    if (!didDocument) {
+      console.log(JSON.stringify({
+        valid: false,
+        did: filters.did,
+        error: 'Could not resolve DID'
+      }, null, 2));
+      return;
+    }
+
+    // Verify key chain integrity
+    const keyHistory = didDocument.keyHistory || [];
+    const issues = [];
+
+    for (let i = 0; i < keyHistory.length - 1; i++) {
+      const current = keyHistory[i];
+      const previous = keyHistory[i + 1];
+
+      if (current.previousKeyId && current.previousKeyId !== previous.keyId) {
+        issues.push({
+          type: 'chain_break',
+          at: current.keyId,
+          expected: current.previousKeyId,
+          found: previous.keyId
+        });
+      }
+    }
+
+    console.log(JSON.stringify({
+      valid: issues.length === 0,
+      did: filters.did,
+      keyCount: didDocument.verificationMethod?.length || 0,
+      rotationCount: keyHistory.filter(k => k.rotatedAt).length,
+      currentKeyId: didDocument.authentication?.[0],
+      controller: didDocument.controller,
+      issues: issues.length > 0 ? issues : undefined
+    }, null, 2));
+    return;
+  }
+
+  console.error(JSON.stringify({
+    error: 'Missing required parameters',
+    usage: [
+      'node capture.js identity verify --did=did:agent:...',
+      'node capture.js identity verify --signature=ed25519:... --termsHash=sha256:...'
+    ]
+  }));
+  process.exit(1);
+}
+
+/**
+ * Set human controller
+ */
+function handleIdentitySetController(args) {
+  const filters = parseFilters(args);
+
+  if (!filters.twitter && !filters.github && !filters.farcaster) {
+    console.error(JSON.stringify({
+      error: 'Controller platform required',
+      usage: 'node capture.js identity set-controller --twitter=@handle'
+    }));
+    process.exit(1);
+  }
+
+  const didDocument = loadLocalDID();
+  if (!didDocument) {
+    console.error(JSON.stringify({ error: 'No local identity found' }));
+    process.exit(1);
+  }
+
+  // Determine platform and handle
+  let platform, handle;
+  if (filters.twitter) {
+    platform = 'twitter';
+    handle = filters.twitter;
+  } else if (filters.github) {
+    platform = 'github';
+    handle = filters.github;
+  } else if (filters.farcaster) {
+    platform = 'farcaster';
+    handle = filters.farcaster;
+  }
+
+  const controllerConfig = {
+    type: 'human',
+    platform,
+    handle,
+    verificationUrl: null,
+    linkedAt: new Date().toISOString()
+  };
+
+  // Update DID document
+  didDocument.controller = controllerConfig;
+  didDocument.updated = new Date().toISOString();
+  fs.writeFileSync(DID_FILE, JSON.stringify(didDocument, null, 2));
+
+  // Save controller config
+  fs.writeFileSync(CONTROLLER_FILE, JSON.stringify(controllerConfig, null, 2));
+
+  // Generate verification challenge
+  const challenge = crypto.randomBytes(16).toString('hex');
+  const verificationMessage = `I am the human controller of ${didDocument.id}\n\nChallenge: ${challenge}\n\n#RECEIPTS #AgentIdentity`;
+
+  console.log(JSON.stringify({
+    success: true,
+    controller: controllerConfig,
+    verificationRequired: true,
+    verificationInstructions: {
+      step1: `Post this message to your ${platform} account:`,
+      message: verificationMessage,
+      step2: `Then run: node capture.js identity verify-controller --url=<POST_URL>`,
+      challenge
+    }
+  }, null, 2));
+}
+
+/**
+ * Verify controller post
+ */
+function handleIdentityVerifyController(args) {
+  const filters = parseFilters(args);
+
+  if (!filters.url) {
+    console.error(JSON.stringify({
+      error: 'Verification URL required',
+      usage: 'node capture.js identity verify-controller --url=https://twitter.com/...'
+    }));
+    process.exit(1);
+  }
+
+  const didDocument = loadLocalDID();
+  if (!didDocument || !didDocument.controller) {
+    console.error(JSON.stringify({
+      error: 'No controller configured',
+      hint: 'Run "identity set-controller" first'
+    }));
+    process.exit(1);
+  }
+
+  // Update controller with verification URL
+  didDocument.controller.verificationUrl = filters.url;
+  didDocument.controller.verifiedAt = new Date().toISOString();
+  didDocument.updated = new Date().toISOString();
+
+  fs.writeFileSync(DID_FILE, JSON.stringify(didDocument, null, 2));
+  fs.writeFileSync(CONTROLLER_FILE, JSON.stringify(didDocument.controller, null, 2));
+
+  console.log(JSON.stringify({
+    success: true,
+    controller: didDocument.controller,
+    message: 'Controller verification recorded. Manual verification recommended.',
+    note: 'In production, this would verify the post content automatically.'
+  }, null, 2));
+}
+
+/**
+ * Recover identity using controller
+ */
+function handleIdentityRecover(args) {
+  const filters = parseFilters(args);
+
+  if (!filters['controller-proof']) {
+    console.error(JSON.stringify({
+      error: 'Recovery proof required',
+      usage: 'node capture.js identity recover --controller-proof=<TWITTER_URL>',
+      note: 'Human controller must post recovery authorization'
+    }));
+    process.exit(1);
+  }
+
+  const didDocument = loadLocalDID();
+  if (!didDocument || !didDocument.controller) {
+    console.error(JSON.stringify({
+      error: 'No identity with controller found',
+      hint: 'Recovery requires a previously configured human controller'
+    }));
+    process.exit(1);
+  }
+
+  if (!filters.confirm) {
+    console.log(JSON.stringify({
+      status: 'recovery_pending',
+      controller: didDocument.controller,
+      proofUrl: filters['controller-proof'],
+      warning: 'This will generate new keys and revoke all existing keys',
+      nextStep: 'Confirm recovery: node capture.js identity recover --controller-proof=<URL> --confirm'
+    }, null, 2));
+    return;
+  }
+
+  // Generate new keypair for recovery
+  const newKeypair = generateEd25519Keypair();
+
+  // Create recovery record
+  const recoveryRecord = {
+    type: 'controller_recovery',
+    did: didDocument.id,
+    controller: didDocument.controller,
+    proofUrl: filters['controller-proof'],
+    previousKeyId: didDocument.authentication?.[0],
+    newKeyId: newKeypair.keyId,
+    recoveredAt: new Date().toISOString()
+  };
+
+  // Update DID document - replace all keys
+  didDocument.verificationMethod = [{
+    id: `${didDocument.id}${newKeypair.keyId}`,
+    type: "Ed25519VerificationKey2020",
+    controller: didDocument.id,
+    publicKeyMultibase: newKeypair.publicKeyMultibase
+  }];
+
+  didDocument.authentication = [`${didDocument.id}${newKeypair.keyId}`];
+  didDocument.assertionMethod = [`${didDocument.id}${newKeypair.keyId}`];
+
+  // Mark all old keys as revoked
+  const revokedKeys = [];
+  for (const key of didDocument.keyHistory) {
+    if (!key.revokedAt) {
+      key.revokedAt = recoveryRecord.recoveredAt;
+      key.revocationReason = 'controller_recovery';
+      revokedKeys.push(key.keyId);
+    }
+  }
+
+  // Add new key to history
+  didDocument.keyHistory.unshift({
+    keyId: newKeypair.keyId,
+    activatedAt: recoveryRecord.recoveredAt,
+    rotatedAt: null,
+    rotationProof: null,
+    publicKeyMultibase: newKeypair.publicKeyMultibase,
+    activationMethod: 'controller_recovery'
+  });
+
+  didDocument.updated = recoveryRecord.recoveredAt;
+
+  // Save everything
+  fs.writeFileSync(DID_FILE, JSON.stringify(didDocument, null, 2));
+
+  const newKeyData = {
+    keyId: newKeypair.keyId,
+    privateKey: newKeypair.privateKey.toString('base64'),
+    publicKeyMultibase: newKeypair.publicKeyMultibase,
+    createdAt: newKeypair.createdAt,
+    encrypted: false
+  };
+
+  const keyFilePath = path.join(PRIVATE_KEY_DIR, 'key-current.json');
+  fs.writeFileSync(keyFilePath, JSON.stringify(newKeyData, null, 2));
+  try { fs.chmodSync(keyFilePath, 0o600); } catch (e) {}
+
+  // Save recovery record
+  fs.writeFileSync(
+    path.join(RECOVERY_DIR, `recovery-${Date.now()}.json`),
+    JSON.stringify(recoveryRecord, null, 2)
+  );
+
+  console.log(JSON.stringify({
+    success: true,
+    recoveryComplete: true,
+    did: didDocument.id,
+    newKeyId: newKeypair.keyId,
+    revokedKeys,
+    message: 'Identity recovered. All previous keys revoked. Publish updated DID document.',
+    version: VERSION
+  }, null, 2));
+}
+
+/**
+ * Publish identity
+ */
+function handleIdentityPublish(args) {
+  const filters = parseFilters(args);
+  const platform = filters.platform || 'local';
+
+  const didDocument = loadLocalDID();
+  if (!didDocument) {
+    console.error(JSON.stringify({ error: 'No local identity found' }));
+    process.exit(1);
+  }
+
+  switch (platform) {
+    case 'moltbook':
+      const moltbookKey = process.env.RECEIPTS_MOLTBOOK_KEY;
+      console.log(JSON.stringify({
+        status: moltbookKey ? 'ready' : 'manual',
+        platform: 'moltbook',
+        did: didDocument.id,
+        suggestedPost: `🪪 IDENTITY: ${didDocument.id}\n\nPublic Key: ${didDocument.verificationMethod[0].publicKeyMultibase.slice(0, 30)}...\nController: ${didDocument.controller?.handle || 'none'}\n\n#RECEIPTS #DID #AgentIdentity`,
+        instructions: moltbookKey ? 'Will post automatically' : 'Set RECEIPTS_MOLTBOOK_KEY to auto-post'
+      }, null, 2));
+      break;
+
+    case 'ipfs':
+      // Future: pin to IPFS
+      console.log(JSON.stringify({
+        status: 'not_implemented',
+        platform: 'ipfs',
+        message: 'IPFS publishing coming in future version'
+      }, null, 2));
+      break;
+
+    case 'local':
+    default:
+      console.log(JSON.stringify({
+        platform: 'local',
+        did: didDocument.id,
+        document: didDocument,
+        exportPath: DID_FILE,
+        message: 'DID document ready. Host at well-known URL for remote resolution.'
+      }, null, 2));
+  }
+}
+
+/**
+ * Export identity
+ */
+function handleIdentityExport(args) {
+  const filters = parseFilters(args);
+
+  const didDocument = loadLocalDID();
+  if (!didDocument) {
+    console.error(JSON.stringify({ error: 'No local identity found' }));
+    process.exit(1);
+  }
+
+  // Export public DID document only (never private keys)
+  console.log(JSON.stringify(didDocument, null, 2));
+}
+
+/**
+ * Show identity help
+ */
+function showIdentityHelp() {
+  console.log(JSON.stringify({
+    command: 'identity',
+    description: 'Self-sovereign agent identity management (v0.6.0)',
+    subcommands: {
+      init: {
+        usage: 'identity init --namespace=X --name=Y [--controller-twitter=@handle]',
+        description: 'Create new identity with Ed25519 keypair'
+      },
+      show: {
+        usage: 'identity show [--full]',
+        description: 'Display identity summary or full DID document'
+      },
+      rotate: {
+        usage: 'identity rotate [--reason=scheduled|compromise|device_change]',
+        description: 'Rotate keys with proof chain (old key signs new key)'
+      },
+      verify: {
+        usage: 'identity verify --did=DID | --signature=SIG --termsHash=HASH',
+        description: 'Verify identity or signature'
+      },
+      'set-controller': {
+        usage: 'identity set-controller --twitter=@handle',
+        description: 'Set human controller for recovery'
+      },
+      'verify-controller': {
+        usage: 'identity verify-controller --url=URL',
+        description: 'Verify controller post'
+      },
+      recover: {
+        usage: 'identity recover --controller-proof=URL [--confirm]',
+        description: 'Recover identity using human controller'
+      },
+      publish: {
+        usage: 'identity publish [--platform=moltbook|ipfs|local]',
+        description: 'Publish DID document'
+      },
+      export: {
+        usage: 'identity export',
+        description: 'Export public DID document'
+      }
+    },
+    version: VERSION
+  }, null, 2));
+}
+
+/**
+ * Migrate existing agreements to DID
+ */
+function handleMigrate(args) {
+  const filters = parseFilters(args);
+
+  if (!filters['to-did']) {
+    console.error(JSON.stringify({
+      error: 'Migration type required',
+      usage: 'node capture.js migrate --to-did'
+    }));
+    process.exit(1);
+  }
+
+  const didDocument = loadLocalDID();
+  if (!didDocument) {
+    console.error(JSON.stringify({
+      error: 'Initialize identity first',
+      hint: 'Run "identity init" before migration'
+    }));
+    process.exit(1);
+  }
+
+  const agentId = process.env.RECEIPTS_AGENT_ID || 'openclaw-agent';
+  const migrationResults = {
+    agreements: { migrated: 0, skipped: 0, errors: 0 },
+    proposals: { migrated: 0, skipped: 0, errors: 0 }
+  };
+
+  // Migrate agreements
+  if (fs.existsSync(AGREEMENTS_DIR)) {
+    const files = fs.readdirSync(AGREEMENTS_DIR).filter(f => f.endsWith('.json'));
+    for (const file of files) {
+      try {
+        const filePath = path.join(AGREEMENTS_DIR, file);
+        const agreement = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+
+        if (agreement.parties?.proposer?.did) {
+          migrationResults.agreements.skipped++;
+          continue;
+        }
+
+        // Add DID references
+        const parties = agreement.parties || [];
+        agreement.partiesLegacy = parties;
+        agreement.parties = {
+          proposer: parties[0] === agentId
+            ? { did: didDocument.id, legacyId: agentId, keyId: didDocument.keyHistory[0]?.keyId }
+            : { did: null, legacyId: parties[0], keyId: null },
+          counterparty: parties[1] === agentId
+            ? { did: didDocument.id, legacyId: agentId, keyId: didDocument.keyHistory[0]?.keyId }
+            : { did: null, legacyId: parties[1], keyId: null }
+        };
+
+        agreement.signaturesLegacy = agreement.signatures;
+        agreement.migratedToDID = true;
+        agreement.migratedAt = new Date().toISOString();
+        agreement.migrationVersion = VERSION;
+
+        fs.writeFileSync(filePath, JSON.stringify(agreement, null, 2));
+        migrationResults.agreements.migrated++;
+      } catch (e) {
+        migrationResults.agreements.errors++;
+      }
+    }
+  }
+
+  // Migrate proposals
+  if (fs.existsSync(PROPOSALS_DIR)) {
+    const files = fs.readdirSync(PROPOSALS_DIR).filter(f => f.endsWith('.json'));
+    for (const file of files) {
+      try {
+        const filePath = path.join(PROPOSALS_DIR, file);
+        const proposal = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+
+        if (proposal.proposer?.did) {
+          migrationResults.proposals.skipped++;
+          continue;
+        }
+
+        proposal.proposerLegacy = proposal.proposer;
+        proposal.proposer = proposal.proposer === agentId
+          ? { did: didDocument.id, legacyId: agentId, keyId: didDocument.keyHistory[0]?.keyId }
+          : { did: null, legacyId: proposal.proposer, keyId: null };
+
+        proposal.migratedToDID = true;
+        proposal.migratedAt = new Date().toISOString();
+
+        fs.writeFileSync(filePath, JSON.stringify(proposal, null, 2));
+        migrationResults.proposals.migrated++;
+      } catch (e) {
+        migrationResults.proposals.errors++;
+      }
+    }
+  }
+
+  console.log(JSON.stringify({
+    success: true,
+    did: didDocument.id,
+    migrationResults,
+    message: 'Migration complete. Legacy data preserved for verification.',
+    version: VERSION
+  }, null, 2));
+}
+
 // === EXPORT MODULE API ===
 // When required as a module, export the programmatic API
 if (typeof module !== 'undefined' && module.exports) {
@@ -2328,6 +3577,17 @@ if (typeof module !== 'undefined' && module.exports) {
     signTerms,
     verifySignature,
 
+    // Identity (v0.6.0)
+    generateDIDDocument,
+    loadLocalDID,
+    resolveDID,
+    signTermsWithDID,
+    verifySignatureWithDID,
+    verifySignatureWithHistory,
+    generateEd25519Keypair,
+    base58btcEncode,
+    base58btcDecode,
+
     // Utilities
     detectRiskFlags: detectRiskFlagsWithCustom,
     detectConsentType,
@@ -2341,6 +3601,8 @@ if (typeof module !== 'undefined' && module.exports) {
     AGREEMENTS_DIR,
     ARBITRATIONS_DIR,
     RULINGS_DIR,
+    IDENTITY_DIR,
+    DID_METHOD,
     VALID_ARBITRATION_REASONS,
   };
 }

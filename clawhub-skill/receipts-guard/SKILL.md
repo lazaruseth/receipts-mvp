@@ -1,29 +1,35 @@
 ---
 name: receipts-guard
-description: Arbitration protocol for autonomous agent commerce. Capture agreements, create mutual signatures, and resolve disputes with evidence.
-metadata: {"openclaw":{"emoji":"⚖️","requires":{"anyBins":["node"]},"version":"0.5.0"}}
+description: Self-sovereign agent identity and arbitration protocol for autonomous agent commerce. Ed25519 signatures, key rotation, human controller recovery.
+metadata: {"openclaw":{"emoji":"⚖️","requires":{"anyBins":["node"]},"version":"0.6.0"}}
 ---
 
-# RECEIPTS Guard v0.5.0 - Arbitration Protocol
+# RECEIPTS Guard v0.6.0 - Self-Sovereign Agent Identity
 
-> "Who controls the evidence becomes who controls the dispute."
+> "Identity isn't metaphysical. It's functional."
 
-Agent commerce infrastructure optimized for winning arbitration. Everything exists to produce evidence that wins disputes.
+Self-sovereign identity + arbitration protocol for agent commerce. Your keys. Your identity. Your disputes.
 
-**Problem solved:** When agents transact with each other, disputes are inevitable. RECEIPTS provides the full lifecycle: proposal → agreement → fulfillment/dispute → ruling.
+**Problems solved:**
+1. **Identity**: How do agents prove who they are across transactions?
+2. **Key Management**: What happens when keys need to rotate?
+3. **Recovery**: How do you recover if keys are compromised?
+4. **Disputes**: When agents transact, disputes are inevitable.
 
 **No API. No cloud. Your data stays local.**
 
-## What's New in v0.5.0
+## What's New in v0.6.0
 
-Built from REMASTER's Agreement Rail whitepaper + 2023 Arbitration Framework:
+- **🪪 Self-Sovereign Identity** - DID-based identity with Ed25519 signatures
+- **🔑 Key Rotation** - Old key signs new key, creating unbroken proof chain
+- **👤 Human Controller** - Twitter-based recovery backstop
+- **✅ Cryptographic Signatures** - Real Ed25519, not placeholder HMAC
+- **↩️ Backward Compatible** - Legacy signatures still work
 
+### From v0.5.0:
 - **⚖️ Full Arbitration Protocol** - propose → accept → fulfill → arbitrate → ruling
 - **📜 PAO (Programmable Agreement Object)** - Canonical termsHash, mutual signatures
 - **📊 LPR (Legal Provenance Review)** - Timeline visualization for arbiters
-- **🔐 Mutual Signatures** - Both parties sign the same termsHash
-- **👨‍⚖️ Arbiter Selection** - Agreed at proposal time, issues binding rulings
-- **📁 Evidence Submission** - Structured evidence periods with deadlines
 
 ## Quick Start
 
@@ -60,6 +66,74 @@ node capture.js timeline --agreementId=agr_xyz789
 ```
 
 ## Commands
+
+### Identity (v0.6.0)
+
+#### `identity init` - Create Identity
+```bash
+node capture.js identity init --namespace=remaster_io --name=receipts-guard \
+  --controller-twitter=@Remaster_io
+```
+
+Creates:
+- Ed25519 keypair
+- DID document: `did:agent:<namespace>:<name>`
+- Human controller configuration
+
+#### `identity show` - Display Identity
+```bash
+node capture.js identity show [--full]
+```
+
+Shows identity summary or full DID document with `--full`.
+
+#### `identity rotate` - Rotate Keys
+```bash
+node capture.js identity rotate [--reason=scheduled|compromise|device_change]
+```
+
+- Old key signs new key (proof chain)
+- Old key archived for historical signature verification
+- Unbroken chain = same identity
+
+#### `identity verify` - Verify Identity or Signature
+```bash
+# Verify DID key chain
+node capture.js identity verify --did=did:agent:acme:trade-bot
+
+# Verify signature
+node capture.js identity verify \
+  --signature="ed25519:xxx:timestamp" \
+  --termsHash="sha256:abc123..."
+```
+
+#### `identity set-controller` - Set Human Controller
+```bash
+node capture.js identity set-controller --twitter=@handle
+```
+
+Links a human controller for emergency recovery.
+
+#### `identity recover` - Emergency Recovery
+```bash
+node capture.js identity recover --controller-proof=<TWITTER_URL> --confirm
+```
+
+Human controller posts recovery authorization, all old keys revoked.
+
+#### `identity publish` - Publish DID Document
+```bash
+node capture.js identity publish [--platform=moltbook|ipfs|local]
+```
+
+#### `migrate` - Migrate to DID
+```bash
+node capture.js migrate --to-did
+```
+
+Upgrades existing agreements to use DID references (preserves legacy data).
+
+---
 
 ### Arbitration Protocol
 
@@ -238,6 +312,49 @@ ARBITRATION:
 
 ## Data Structures
 
+### DID Document (`identity/did.json`) - v0.6.0
+```json
+{
+  "@context": ["https://www.w3.org/ns/did/v1"],
+  "id": "did:agent:remaster_io:receipts-guard",
+
+  "verificationMethod": [{
+    "id": "did:agent:remaster_io:receipts-guard#key-xxx",
+    "type": "Ed25519VerificationKey2020",
+    "controller": "did:agent:remaster_io:receipts-guard",
+    "publicKeyMultibase": "z6Mkf5rGMoatrSj1f..."
+  }],
+
+  "authentication": ["did:agent:remaster_io:receipts-guard#key-xxx"],
+
+  "keyHistory": [{
+    "keyId": "#key-xxx",
+    "activatedAt": "2026-02-09T00:00:00Z",
+    "rotatedAt": null,
+    "rotationProof": null,
+    "publicKeyMultibase": "z6Mkf5rGMoatrSj1f..."
+  }],
+
+  "controller": {
+    "type": "human",
+    "platform": "twitter",
+    "handle": "@Remaster_io"
+  },
+
+  "created": "2026-02-09T00:00:00Z",
+  "updated": "2026-02-09T00:00:00Z"
+}
+```
+
+### Signature Formats
+```
+# Ed25519 (v0.6.0) - cryptographically secure
+ed25519:<base64url-signature>:<timestamp>
+
+# Legacy HMAC (v0.5.0 and earlier) - still supported for backward compatibility
+sig:<hex-signature>:<timestamp>
+```
+
 ### Proposal (`proposals/prop_xxx.json`)
 ```json
 {
@@ -249,7 +366,7 @@ ARBITRATION:
   "proposedArbiter": "arbiter-prime",
   "deadline": "2026-02-15T00:00:00Z",
   "value": "100 USD",
-  "proposerSignature": "sig:...",
+  "proposerSignature": "ed25519:...",
   "status": "pending_acceptance",
   "createdAt": "...",
   "expiresAt": "..."
@@ -264,8 +381,8 @@ ARBITRATION:
   "parties": ["agent-a", "agent-b"],
   "arbiter": "arbiter-prime",
   "signatures": {
-    "agent-a": "sig:...",
-    "agent-b": "sig:..."
+    "agent-a": "ed25519:...",
+    "agent-b": "ed25519:..."
   },
   "status": "active",
   "timeline": [
@@ -310,21 +427,29 @@ ARBITRATION:
 
 ```
 ~/.openclaw/receipts/
-├── index.json                # Fast lookup index
+├── identity/                   # v0.6.0 Self-Sovereign Identity
+│   ├── did.json                # DID document (public)
+│   ├── private/
+│   │   ├── key-current.json    # Current private key
+│   │   └── key-archive/        # Rotated keys (for verification)
+│   ├── key-history.json        # Rotation chain with proofs
+│   ├── controller.json         # Human controller config
+│   └── recovery/               # Recovery records
+├── index.json                  # Fast lookup index
 ├── proposals/
-│   └── prop_xxx.json         # Proposal metadata
+│   └── prop_xxx.json           # Proposal metadata
 ├── agreements/
-│   ├── agr_xxx.json          # Agreement metadata
-│   └── agr_xxx.txt           # Terms text
+│   ├── agr_xxx.json            # Agreement metadata
+│   └── agr_xxx.txt             # Terms text
 ├── arbitrations/
-│   └── arb_xxx.json          # Arbitration record
+│   └── arb_xxx.json            # Arbitration record
 ├── rulings/
-│   └── rul_xxx.json          # Ruling record
+│   └── rul_xxx.json            # Ruling record
 ├── witnesses/
-│   └── witness_xxx.json      # Witness anchors
-├── local_xxx.json            # ToS captures
-├── promise_xxx.json          # Promise captures
-└── custom-rules.json         # Custom rulesets
+│   └── witness_xxx.json        # Witness anchors
+├── local_xxx.json              # ToS captures
+├── promise_xxx.json            # Promise captures
+└── custom-rules.json           # Custom rulesets
 ```
 
 ## Agent Instructions
