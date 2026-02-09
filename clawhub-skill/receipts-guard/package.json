@@ -1,6 +1,6 @@
 {
   "name": "receipts-guard",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Agent commerce infrastructure with ERC-8004 identity, x402 payments, and arbitration protocol",
   "main": "capture.js",
   "bin": {
@@ -22,7 +22,8 @@
   "author": "Remaster.io",
   "license": "MIT",
   "dependencies": {
-    "ethers": "^6.11.0"
+    "ethers": "^6.11.0",
+    "tweetnacl": "^1.0.3"
   },
   "engines": {
     "node": ">=18.0.0"

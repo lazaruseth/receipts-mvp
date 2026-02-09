@@ -77,7 +77,7 @@ const RECEIPTS_DIR = path.join(
 const INDEX_FILE = path.join(RECEIPTS_DIR, 'index.json');
 
 // Version
-const VERSION = '0.7.0';
+const VERSION = '0.7.1';
 
 // Arbitration directories
 const PROPOSALS_DIR = path.join(RECEIPTS_DIR, 'proposals');
@@ -3954,6 +3954,214 @@ function handleMigrate(args) {
 }
 
 // === HTTP SERVER MODE (v0.7.0) ===
+// === SECURITY HARDENING (v0.7.1) ===
+
+// Rate limiting state
+const rateLimits = new Map(); // IP -> { count, resetTime }
+const RATE_LIMIT = parseInt(process.env.RECEIPTS_RATE_LIMIT) || 100; // requests per minute
+const RATE_WINDOW = 60000; // 1 minute
+
+/**
+ * Check rate limit for IP
+ */
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const entry = rateLimits.get(ip) || { count: 0, resetTime: now + RATE_WINDOW };
+
+  if (now > entry.resetTime) {
+    entry.count = 0;
+    entry.resetTime = now + RATE_WINDOW;
+  }
+
+  entry.count++;
+  rateLimits.set(ip, entry);
+
+  return {
+    allowed: entry.count <= RATE_LIMIT,
+    remaining: Math.max(0, RATE_LIMIT - entry.count),
+    resetAt: entry.resetTime
+  };
+}
+
+/**
+ * Get CORS headers based on allowed origins
+ */
+function getCorsHeaders(req) {
+  const origin = req.headers.origin;
+  const allowedOrigins = process.env.RECEIPTS_ALLOWED_ORIGINS?.split(',') || [];
+
+  // If no allowed origins configured, block all cross-origin (secure default)
+  // Unless '*' is explicitly set
+  if (allowedOrigins.includes('*')) {
+    return {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, X-API-Key, X-DID, X-DID-Signature, X-DID-Timestamp'
+    };
+  }
+
+  if (origin && allowedOrigins.includes(origin)) {
+    return {
+      'Access-Control-Allow-Origin': origin,
+      'Access-Control-Allow-Credentials': 'true',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, X-API-Key, X-DID, X-DID-Signature, X-DID-Timestamp'
+    };
+  }
+
+  // No CORS headers = browser blocks cross-origin requests (secure default)
+  return {};
+}
+
+/**
+ * Authenticate HTTP request
+ * Supports: API Key (X-API-Key) or DID Request Signing (X-DID-Signature)
+ */
+function authenticateRequest(req) {
+  // Option 1: API Key header
+  const apiKey = req.headers['x-api-key'];
+  const configuredApiKey = process.env.RECEIPTS_API_KEY;
+
+  if (apiKey && configuredApiKey && apiKey === configuredApiKey) {
+    return { authenticated: true, method: 'api-key', did: null };
+  }
+
+  // Option 2: DID Request Signing
+  const signature = req.headers['x-did-signature'];
+  const timestamp = req.headers['x-did-timestamp'];
+  const did = req.headers['x-did'];
+
+  if (signature && timestamp && did) {
+    // Verify timestamp is within 5 minutes (prevents replay attacks)
+    const now = Date.now();
+    const reqTime = parseInt(timestamp);
+    if (isNaN(reqTime) || Math.abs(now - reqTime) > 300000) {
+      return { authenticated: false, error: 'Request timestamp expired or invalid' };
+    }
+
+    // Build signed message: METHOD:PATH:TIMESTAMP
+    const url = new URL(req.url, 'http://localhost');
+    const message = `${req.method}:${url.pathname}:${timestamp}`;
+
+    // Verify signature using our Ed25519 verification
+    try {
+      const verified = verifyDIDSignature(message, signature, did);
+      if (verified) {
+        return { authenticated: true, method: 'did-signature', did };
+      }
+    } catch (e) {
+      return { authenticated: false, error: `Signature verification failed: ${e.message}` };
+    }
+  }
+
+  // No valid authentication provided
+  return { authenticated: false, error: 'Authentication required. Provide X-API-Key or X-DID-Signature headers.' };
+}
+
+/**
+ * Verify DID signature for HTTP requests
+ */
+function verifyDIDSignature(message, signature, did) {
+  // Try to resolve DID locally first
+  const localDid = loadLocalDID();
+
+  // If the DID matches our local identity, verify with our key
+  if (localDid && localDid.id === did) {
+    // Load public key from DID document
+    const keyMethod = localDid.verificationMethod?.[0];
+    if (!keyMethod?.publicKeyMultibase) {
+      throw new Error('No public key in local DID document');
+    }
+
+    // Decode public key (remove 'z' prefix for base58btc)
+    const publicKeyBase58 = keyMethod.publicKeyMultibase.slice(1);
+    const publicKeyBytes = base58Decode(publicKeyBase58);
+
+    // Parse signature: ed25519:BASE64URL:TIMESTAMP (we only need the base64url part)
+    const sigParts = signature.split(':');
+    if (sigParts[0] !== 'ed25519' || sigParts.length < 2) {
+      throw new Error('Invalid signature format');
+    }
+    const signatureBytes = Buffer.from(sigParts[1], 'base64url');
+
+    // Verify using nacl
+    const nacl = require('tweetnacl');
+    const messageBytes = Buffer.from(message, 'utf8');
+    return nacl.sign.detached.verify(messageBytes, signatureBytes, publicKeyBytes);
+  }
+
+  // For external DIDs, we could resolve from chain or registry
+  // For now, only allow local DID verification
+  throw new Error('External DID verification not yet supported');
+}
+
+/**
+ * Validate proposal input
+ */
+function validateProposalInput(body) {
+  const errors = [];
+
+  // Validate payment address (ERC-55 checksum if provided)
+  if (body.paymentAddress) {
+    if (typeof body.paymentAddress !== 'string' ||
+        !/^0x[a-fA-F0-9]{40}$/.test(body.paymentAddress)) {
+      errors.push('Invalid payment address format (must be 0x followed by 40 hex chars)');
+    }
+  }
+
+  // Validate arbitration cost (positive number, reasonable range)
+  if (body.arbitrationCost !== undefined && body.arbitrationCost !== null) {
+    const cost = parseFloat(body.arbitrationCost);
+    if (isNaN(cost) || cost < 0) {
+      errors.push('Invalid arbitration cost (must be non-negative number)');
+    } else if (cost > 1000000) {
+      errors.push('Arbitration cost exceeds maximum (1000000)');
+    }
+  }
+
+  // Validate deadline (must be ISO date string in the future)
+  if (body.deadline) {
+    const deadline = new Date(body.deadline);
+    if (isNaN(deadline.getTime())) {
+      errors.push('Invalid deadline format (must be ISO date string)');
+    } else if (deadline < new Date()) {
+      errors.push('Deadline must be in the future');
+    }
+  }
+
+  // Validate payment token if specified
+  if (body.paymentToken) {
+    const validTokens = ['USDC', 'ETH', 'USDT', 'DAI'];
+    if (!validTokens.includes(body.paymentToken.toUpperCase())) {
+      errors.push(`Invalid payment token (must be one of: ${validTokens.join(', ')})`);
+    }
+  }
+
+  // Validate payment chain if specified
+  if (body.paymentChain) {
+    const validChains = Object.keys(CHAIN_CONFIG);
+    if (!validChains.includes(body.paymentChain)) {
+      errors.push(`Invalid payment chain (must be one of: ${validChains.join(', ')})`);
+    }
+  }
+
+  return errors;
+}
+
+/**
+ * Check if endpoint requires authentication
+ */
+function requiresAuth(pathname, method) {
+  // Public endpoints (no auth required)
+  const publicEndpoints = [
+    { path: '/', method: 'GET' },
+    { path: '/health', method: 'GET' },
+    { path: '/identity', method: 'GET' },
+    { path: '/identity/chains', method: 'GET' }
+  ];
+
+  return !publicEndpoints.some(e => e.path === pathname && e.method === method);
+}
 
 /**
  * Start HTTP server for cloud deployment
@@ -3964,14 +4172,40 @@ function startHttpServer(args) {
   const port = filters.port || process.env.PORT || 3000;
 
   const server = http.createServer(async (req, res) => {
-    // CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    // Get client IP for rate limiting
+    const clientIp = req.headers['x-forwarded-for']?.split(',')[0] ||
+                     req.socket.remoteAddress ||
+                     'unknown';
+
+    // Check rate limit
+    const rateCheck = checkRateLimit(clientIp);
+    res.setHeader('X-RateLimit-Limit', RATE_LIMIT);
+    res.setHeader('X-RateLimit-Remaining', rateCheck.remaining);
+    res.setHeader('X-RateLimit-Reset', rateCheck.resetAt);
+
+    if (!rateCheck.allowed) {
+      res.writeHead(429, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        error: 'Too many requests',
+        retryAfter: Math.ceil((rateCheck.resetAt - Date.now()) / 1000)
+      }));
+      return;
+    }
+
+    // Set CORS headers (restrictive by default)
+    const corsHeaders = getCorsHeaders(req);
+    Object.entries(corsHeaders).forEach(([key, value]) => {
+      res.setHeader(key, value);
+    });
     res.setHeader('Content-Type', 'application/json');
 
+    // Handle CORS preflight
     if (req.method === 'OPTIONS') {
-      res.writeHead(200);
+      if (Object.keys(corsHeaders).length > 0) {
+        res.writeHead(200);
+      } else {
+        res.writeHead(403);
+      }
       res.end();
       return;
     }
@@ -3980,6 +4214,22 @@ function startHttpServer(args) {
     const pathname = url.pathname;
 
     try {
+      // Check authentication for protected endpoints
+      if (requiresAuth(pathname, req.method)) {
+        const auth = authenticateRequest(req);
+        if (!auth.authenticated) {
+          res.writeHead(401);
+          res.end(JSON.stringify({
+            error: 'Unauthorized',
+            message: auth.error || 'Authentication required',
+            hint: 'Provide X-API-Key header or sign request with X-DID, X-DID-Signature, X-DID-Timestamp headers'
+          }));
+          return;
+        }
+        // Store auth info for use in handlers
+        req.auth = auth;
+      }
+
       // Parse body for POST requests
       let body = {};
       if (req.method === 'POST') {
@@ -4022,7 +4272,14 @@ function startHttpServer(args) {
             res.end(JSON.stringify({ error: 'Method not allowed. Use POST.' }));
             break;
           }
-          const proposeResult = handleProposeHttp(body);
+          // Input validation
+          const proposeValidation = validateProposalInput(body);
+          if (proposeValidation.length > 0) {
+            res.writeHead(400);
+            res.end(JSON.stringify({ error: 'Validation failed', details: proposeValidation }));
+            break;
+          }
+          const proposeResult = handleProposeHttp(body, req.auth);
           res.writeHead(proposeResult.error ? 400 : 200);
           res.end(JSON.stringify(proposeResult, null, 2));
           break;
@@ -4033,8 +4290,12 @@ function startHttpServer(args) {
             res.end(JSON.stringify({ error: 'Method not allowed. Use POST.' }));
             break;
           }
-          const acceptResult = handleAcceptHttp(body);
-          res.writeHead(acceptResult.error ? 400 : 200);
+          const acceptResult = handleAcceptHttp(body, req.auth);
+          if (acceptResult.status === 403) {
+            res.writeHead(403);
+          } else {
+            res.writeHead(acceptResult.error ? 400 : 200);
+          }
           res.end(JSON.stringify(acceptResult, null, 2));
           break;
 
@@ -4083,23 +4344,35 @@ function startHttpServer(args) {
   });
 
   server.listen(port, () => {
+    const apiKeyConfigured = !!process.env.RECEIPTS_API_KEY;
+    const allowedOrigins = process.env.RECEIPTS_ALLOWED_ORIGINS?.split(',') || [];
+
     console.log(JSON.stringify({
       status: 'running',
       service: 'receipts-guard',
       version: VERSION,
       port,
-      endpoints: [
-        `http://localhost:${port}/`,
-        `http://localhost:${port}/health`,
-        `http://localhost:${port}/identity`,
-        `http://localhost:${port}/identity/chains`,
-        `http://localhost:${port}/list`,
-        `http://localhost:${port}/proposals`,
-        `http://localhost:${port}/agreements`,
-        `POST http://localhost:${port}/propose`,
-        `POST http://localhost:${port}/accept`
-      ],
-      message: 'RECEIPTS Guard HTTP server ready'
+      security: {
+        authentication: apiKeyConfigured ? 'API Key + DID Signing' : 'DID Signing only (set RECEIPTS_API_KEY for API key auth)',
+        cors: allowedOrigins.length > 0 ? `Restricted to: ${allowedOrigins.join(', ')}` : 'Blocked (set RECEIPTS_ALLOWED_ORIGINS)',
+        rateLimit: `${RATE_LIMIT} requests/minute`
+      },
+      endpoints: {
+        public: [
+          'GET /',
+          'GET /health',
+          'GET /identity',
+          'GET /identity/chains'
+        ],
+        protected: [
+          'GET /list (auth required)',
+          'GET /agreements (auth required)',
+          'GET /proposals (auth required)',
+          'POST /propose (auth required)',
+          'POST /accept (auth required, counterparty only)'
+        ]
+      },
+      message: 'RECEIPTS Guard HTTP server ready (v0.7.1 security hardened)'
     }, null, 2));
   });
 }
@@ -4125,7 +4398,7 @@ function parseRequestBody(req) {
 /**
  * HTTP handler for propose
  */
-function handleProposeHttp(body) {
+function handleProposeHttp(body, auth) {
   const { terms, counterparty, arbiter, deadline, value, arbitrationCost, paymentAddress, paymentToken, paymentChain } = body;
 
   if (!terms || !counterparty) {
@@ -4198,7 +4471,7 @@ function handleProposeHttp(body) {
 /**
  * HTTP handler for accept
  */
-function handleAcceptHttp(body) {
+function handleAcceptHttp(body, auth) {
   const { proposalId } = body;
 
   if (!proposalId) {
@@ -4214,6 +4487,22 @@ function handleAcceptHttp(body) {
 
   if (proposal.status !== 'pending_acceptance') {
     return { error: 'Proposal is not pending acceptance', currentStatus: proposal.status };
+  }
+
+  // Authorization check: If authenticated via DID, verify requester is the counterparty
+  // For API key auth, we trust the server owner (they control the agent)
+  if (auth?.method === 'did-signature' && auth.did) {
+    // The accepting party's DID must match the proposal's counterparty
+    // Note: counterparty could be a DID or agent ID
+    if (auth.did !== proposal.counterparty && !proposal.counterparty.includes(auth.did)) {
+      return {
+        error: 'Forbidden',
+        message: 'You are not authorized to accept this proposal. Only the counterparty can accept.',
+        expectedCounterparty: proposal.counterparty,
+        yourDid: auth.did,
+        status: 403
+      };
+    }
   }
 
   const agentId = process.env.RECEIPTS_AGENT_ID || 'openclaw-agent';

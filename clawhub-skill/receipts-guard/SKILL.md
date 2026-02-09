@@ -1,10 +1,10 @@
 ---
 name: receipts-guard
 description: ERC-8004 identity, x402 payments, and arbitration protocol for autonomous agent commerce. The three rails for the machine economy.
-metadata: {"openclaw":{"emoji":"⚖️","requires":{"anyBins":["node"]},"version":"0.7.0"}}
+metadata: {"openclaw":{"emoji":"⚖️","requires":{"anyBins":["node"]},"version":"0.7.1"}}
 ---
 
-# RECEIPTS Guard v0.7.0 - The Three Rails
+# RECEIPTS Guard v0.7.1 - The Three Rails
 
 > "The rails for the machine economy."
 
@@ -17,7 +17,15 @@ ERC-8004 identity + x402 payments + arbitration protocol. The infrastructure for
 | **Trust** | ERC-8004 Reputation | Arbitration outcomes build reputation |
 | **Payment** | x402 | Paid arbitration, automated settlements |
 
-**Local-first. Chain-anchored. Cloud-deployable.**
+**Local-first. Chain-anchored. Cloud-deployable. Security-hardened.**
+
+## What's New in v0.7.1 (Security Hardening)
+
+- **🔐 HTTP Authentication** - API Key and DID Request Signing
+- **🛡️ Authorization Checks** - Counterparty verification for /accept
+- **🌐 CORS Hardening** - Configurable origin whitelist (blocked by default)
+- **⚡ Rate Limiting** - 100 requests/minute per IP
+- **✅ Input Validation** - Payment address, cost, deadline validation
 
 ## What's New in v0.7.0
 
@@ -228,16 +236,104 @@ Run RECEIPTS Guard as a persistent cloud agent.
 node capture.js serve [--port=3000]
 ```
 
-Endpoints:
+**Public Endpoints (no auth):**
 - `GET /` - Service info
 - `GET /health` - Health check
 - `GET /identity` - DID document
 - `GET /identity/chains` - Chain status
+
+**Protected Endpoints (auth required):**
 - `GET /list` - List all records
 - `GET /proposals` - List proposals
 - `GET /agreements` - List agreements
 - `POST /propose` - Create proposal
-- `POST /accept` - Accept proposal
+- `POST /accept` - Accept proposal (counterparty only)
+
+---
+
+### HTTP API Security (v0.7.1)
+
+The HTTP server implements multiple security layers:
+
+#### Authentication
+
+**Option 1: API Key**
+```bash
+# Generate a secure API key
+export RECEIPTS_API_KEY=$(openssl rand -hex 32)
+
+# Use in requests
+curl -H "X-API-Key: $RECEIPTS_API_KEY" https://your-agent.fly.dev/list
+```
+
+**Option 2: DID Request Signing**
+```bash
+# Sign each request with your Ed25519 key
+# Headers required:
+# - X-DID: your DID (e.g., did:agent:namespace:name)
+# - X-DID-Timestamp: Unix timestamp in milliseconds
+# - X-DID-Signature: ed25519:BASE64URL_SIGNATURE:TIMESTAMP
+
+# Signed message format: METHOD:PATH:TIMESTAMP
+# Example: POST:/propose:1707494400000
+```
+
+#### CORS Configuration
+
+By default, cross-origin requests are **blocked** for security.
+
+```bash
+# Allow specific origins
+export RECEIPTS_ALLOWED_ORIGINS=https://app.example.com,https://dashboard.example.com
+
+# Allow all origins (not recommended for production)
+export RECEIPTS_ALLOWED_ORIGINS=*
+```
+
+#### Rate Limiting
+
+Default: 100 requests per minute per IP.
+
+```bash
+# Customize rate limit
+export RECEIPTS_RATE_LIMIT=200
+```
+
+Response headers:
+- `X-RateLimit-Limit` - Max requests per window
+- `X-RateLimit-Remaining` - Remaining requests
+- `X-RateLimit-Reset` - Window reset timestamp
+
+#### Input Validation
+
+All POST endpoints validate:
+- **Payment addresses** - Must be valid Ethereum address format (0x + 40 hex chars)
+- **Arbitration costs** - Must be non-negative, max 1,000,000
+- **Deadlines** - Must be valid ISO date in the future
+- **Payment tokens** - Must be USDC, ETH, USDT, or DAI
+- **Payment chains** - Must be configured chain (ethereum, base, sepolia)
+
+#### Authorization
+
+- `/accept` endpoint verifies the requester is the designated counterparty (when using DID signing)
+- API key authentication trusts the server owner
+
+#### Environment Variables
+
+```bash
+# Security
+RECEIPTS_API_KEY=              # API key for authentication (generate with: openssl rand -hex 32)
+RECEIPTS_ALLOWED_ORIGINS=      # Comma-separated CORS origins (default: none/blocked)
+RECEIPTS_RATE_LIMIT=           # Requests per minute (default: 100)
+
+# Existing
+RECEIPTS_WALLET_PRIVATE_KEY=   # For on-chain transactions
+RECEIPTS_AGENT_ID=             # Agent identifier
+ETHEREUM_RPC=                  # Ethereum RPC endpoint
+BASE_RPC=                      # Base RPC endpoint
+```
+
+---
 
 #### Fly.io Sprites Deployment
 ```bash
