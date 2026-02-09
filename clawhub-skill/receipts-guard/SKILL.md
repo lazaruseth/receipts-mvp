@@ -1,30 +1,35 @@
 ---
 name: receipts-guard
-description: Self-sovereign agent identity and arbitration protocol for autonomous agent commerce. Ed25519 signatures, key rotation, human controller recovery.
-metadata: {"openclaw":{"emoji":"⚖️","requires":{"anyBins":["node"]},"version":"0.6.0"}}
+description: ERC-8004 identity, x402 payments, and arbitration protocol for autonomous agent commerce. The three rails for the machine economy.
+metadata: {"openclaw":{"emoji":"⚖️","requires":{"anyBins":["node"]},"version":"0.7.0"}}
 ---
 
-# RECEIPTS Guard v0.6.0 - Self-Sovereign Agent Identity
+# RECEIPTS Guard v0.7.0 - The Three Rails
 
-> "Identity isn't metaphysical. It's functional."
+> "The rails for the machine economy."
 
-Self-sovereign identity + arbitration protocol for agent commerce. Your keys. Your identity. Your disputes.
+ERC-8004 identity + x402 payments + arbitration protocol. The infrastructure for agent commerce.
 
-**Problems solved:**
-1. **Identity**: How do agents prove who they are across transactions?
-2. **Key Management**: What happens when keys need to rotate?
-3. **Recovery**: How do you recover if keys are compromised?
-4. **Disputes**: When agents transact, disputes are inevitable.
+**The Three Rails:**
+| Rail | Standard | Purpose |
+|------|----------|---------|
+| **Identity** | ERC-8004 | On-chain agent identity anchoring |
+| **Trust** | ERC-8004 Reputation | Arbitration outcomes build reputation |
+| **Payment** | x402 | Paid arbitration, automated settlements |
 
-**No API. No cloud. Your data stays local.**
+**Local-first. Chain-anchored. Cloud-deployable.**
 
-## What's New in v0.6.0
+## What's New in v0.7.0
 
+- **⛓️ ERC-8004 Integration** - Anchor identity to Ethereum/Base registries
+- **💰 x402 Payments** - Paid arbitration with USDC/ETH
+- **☁️ Cloud Deployment** - Dockerfile + Fly.io Sprites support
+- **🌐 HTTP Server Mode** - REST API for cloud agents
+
+### From v0.6.0:
 - **🪪 Self-Sovereign Identity** - DID-based identity with Ed25519 signatures
 - **🔑 Key Rotation** - Old key signs new key, creating unbroken proof chain
 - **👤 Human Controller** - Twitter-based recovery backstop
-- **✅ Cryptographic Signatures** - Real Ed25519, not placeholder HMAC
-- **↩️ Backward Compatible** - Legacy signatures still work
 
 ### From v0.5.0:
 - **⚖️ Full Arbitration Protocol** - propose → accept → fulfill → arbitrate → ruling
@@ -125,6 +130,136 @@ Human controller posts recovery authorization, all old keys revoked.
 ```bash
 node capture.js identity publish [--platform=moltbook|ipfs|local]
 ```
+
+#### `identity anchor` - Anchor to ERC-8004 (v0.7.0)
+```bash
+node capture.js identity anchor --chain=ethereum|base|sepolia
+```
+
+Registers identity on-chain to ERC-8004 Identity Registry:
+- Requires `RECEIPTS_WALLET_PRIVATE_KEY` environment variable
+- Stores transaction hash in DID document
+- Mainnet: credibility anchor
+- Base: x402-native, lower fees
+
+**Deployed Registries:**
+| Chain | Identity Registry | Status |
+|-------|-------------------|--------|
+| Ethereum | `0x8004A169FB4a3325136EB29fA0ceB6D2e539a432` | Live |
+| Sepolia | `0x8004A818BFB912233c491871b3d84c89A494BD9e` | Testnet |
+| Base | Coming soon | TBD |
+
+#### `identity resolve` - Resolve DID (v0.7.0)
+```bash
+node capture.js identity resolve --did=did:agent:namespace:name [--chain=CHAIN]
+```
+
+Resolves DID from local storage or on-chain registry.
+
+---
+
+### ERC-8004 Integration (v0.7.0)
+
+The ERC-8004 standard provides three registries for agent trust:
+
+1. **Identity Registry** - NFT-based agent identifiers
+2. **Reputation Registry** - On-chain feedback and scores
+3. **Validation Registry** - Work verification by validators
+
+RECEIPTS integrates with existing registries while providing superior off-chain agreement lifecycle management.
+
+**Chain Configuration:**
+```bash
+# Environment variables
+export ETHEREUM_RPC=https://eth.llamarpc.com
+export BASE_RPC=https://mainnet.base.org
+export RECEIPTS_WALLET_PRIVATE_KEY=0x... # Never commit this!
+```
+
+---
+
+### x402 Payment Integration (v0.7.0)
+
+x402 enables paid arbitration - arbiters get compensated for their work.
+
+#### Proposal with Payment Terms
+```bash
+node capture.js propose "Service agreement" "counterparty" \
+  --arbiter="arbiter-prime" \
+  --arbitration-cost="10" \
+  --payment-token="USDC" \
+  --payment-chain="base" \
+  --payment-address="0x..." # Arbiter's address
+```
+
+#### Arbitration with Payment Proof
+```bash
+# Without payment proof (fails if x402 required)
+node capture.js arbitrate --agreementId=agr_xxx --reason="non_delivery"
+# Error: Payment required: 10 USDC
+
+# With payment proof
+node capture.js arbitrate --agreementId=agr_xxx --reason="non_delivery" \
+  --evidence="..." --payment-proof="0x123..."
+```
+
+**x402 Schema:**
+```json
+{
+  "x402": {
+    "arbitrationCost": "10",
+    "arbitrationToken": "USDC",
+    "arbitrationChain": 8453,
+    "paymentAddress": "0x...",
+    "paymentProtocol": "x402",
+    "version": "1.0"
+  }
+}
+```
+
+---
+
+### Cloud Deployment (v0.7.0)
+
+Run RECEIPTS Guard as a persistent cloud agent.
+
+#### HTTP Server Mode
+```bash
+node capture.js serve [--port=3000]
+```
+
+Endpoints:
+- `GET /` - Service info
+- `GET /health` - Health check
+- `GET /identity` - DID document
+- `GET /identity/chains` - Chain status
+- `GET /list` - List all records
+- `GET /proposals` - List proposals
+- `GET /agreements` - List agreements
+- `POST /propose` - Create proposal
+- `POST /accept` - Accept proposal
+
+#### Fly.io Sprites Deployment
+```bash
+# Deploy
+fly launch
+fly deploy
+
+# Configure secrets
+fly secrets set RECEIPTS_WALLET_PRIVATE_KEY=...
+fly secrets set ETHEREUM_RPC=...
+
+# Create persistent volume
+fly volumes create receipts_data --size 1
+```
+
+#### Docker
+```bash
+docker build -t receipts-guard .
+docker run -p 3000:3000 -v receipts-data:/data receipts-guard
+```
+
+---
 
 #### `migrate` - Migrate to DID
 ```bash

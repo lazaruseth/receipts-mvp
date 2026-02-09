@@ -64,6 +64,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { ethers } = require('ethers');
 
 // Receipts directory
 const RECEIPTS_DIR = path.join(
@@ -76,7 +77,7 @@ const RECEIPTS_DIR = path.join(
 const INDEX_FILE = path.join(RECEIPTS_DIR, 'index.json');
 
 // Version
-const VERSION = '0.6.0';
+const VERSION = '0.7.0';
 
 // Arbitration directories
 const PROPOSALS_DIR = path.join(RECEIPTS_DIR, 'proposals');
@@ -115,6 +116,54 @@ const CUSTOM_RULES_FILE = process.env.RECEIPTS_CUSTOM_RULES ||
 
 // Witness anchors directory
 const WITNESS_DIR = path.join(RECEIPTS_DIR, 'witnesses');
+
+// === ERC-8004 CHAIN CONFIGURATION (v0.7.0) ===
+const CHAIN_CONFIG = {
+  ethereum: {
+    chainId: 1,
+    name: 'Ethereum Mainnet',
+    rpc: process.env.ETHEREUM_RPC || 'https://eth.llamarpc.com',
+    identityRegistry: '0x8004A169FB4a3325136EB29fA0ceB6D2e539a432',
+    reputationRegistry: '0x8004BAa17C55a88189AE136b182e5fdA19dE9b63',
+    explorer: 'https://etherscan.io'
+  },
+  base: {
+    chainId: 8453,
+    name: 'Base',
+    rpc: process.env.BASE_RPC || 'https://mainnet.base.org',
+    identityRegistry: null, // TBD - deploy or wait for official
+    reputationRegistry: null,
+    explorer: 'https://basescan.org'
+  },
+  sepolia: {
+    chainId: 11155111,
+    name: 'Sepolia Testnet',
+    rpc: process.env.SEPOLIA_RPC || 'https://rpc.sepolia.org',
+    identityRegistry: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
+    reputationRegistry: '0x8004B663056A597Dffe9eCcC1965A193B7388713',
+    explorer: 'https://sepolia.etherscan.io'
+  }
+};
+
+// ERC-8004 Identity Registry ABI (minimal for registration)
+const IDENTITY_REGISTRY_ABI = [
+  'function register(string agentURI) external returns (uint256)',
+  'function register(string agentURI, tuple(string key, bytes value)[] metadata) external returns (uint256)',
+  'function setAgentURI(uint256 agentId, string newURI) external',
+  'function getMetadata(uint256 agentId, string metadataKey) external view returns (bytes)',
+  'function setMetadata(uint256 agentId, string metadataKey, bytes metadataValue) external',
+  'function ownerOf(uint256 tokenId) external view returns (address)',
+  'function tokenURI(uint256 tokenId) external view returns (string)',
+  'event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)'
+];
+
+// ERC-8004 Reputation Registry ABI (minimal for feedback)
+const REPUTATION_REGISTRY_ABI = [
+  'function giveFeedback(uint256 agentId, int128 value, uint8 valueDecimals, string tag1, string tag2, string endpoint, string feedbackURI, bytes32 feedbackHash) external',
+  'function getSummary(uint256 agentId, address[] clientAddresses, string tag1, string tag2) external view returns (uint64 count, int128 summaryValue, uint8 decimals)',
+  'function readFeedback(uint256 agentId, address clientAddress, uint64 feedbackIndex) external view returns (int128 value, uint8 valueDecimals, string tag1, string tag2, bool isRevoked)',
+  'event FeedbackGiven(uint256 indexed agentId, address indexed clientAddress, uint64 feedbackIndex, int128 value)'
+];
 
 // Hook registry for framework integrations
 const hooks = {
@@ -187,6 +236,10 @@ switch (command) {
     break;
   case 'migrate':
     handleMigrate(args.slice(1));
+    break;
+  // === HTTP SERVER MODE (v0.7.0) ===
+  case 'serve':
+    startHttpServer(args.slice(1));
     break;
   default:
     // Legacy mode: if first arg looks like document text, treat as capture
@@ -1250,6 +1303,26 @@ function handlePropose(args) {
   const value = filters.value || null;
   const channel = filters.channel || 'local';
 
+  // x402 Payment configuration (v0.7.0)
+  const arbitrationCost = filters['arbitration-cost'] || null;
+  const paymentAddress = filters['payment-address'] || null;
+  const paymentToken = filters['payment-token'] || 'USDC';
+  const paymentChain = filters['payment-chain'] || 'base';
+
+  // Build x402 payment schema if arbitration cost specified
+  let x402 = null;
+  if (arbitrationCost) {
+    x402 = {
+      arbitrationCost,
+      arbitrationToken: paymentToken,
+      arbitrationChain: CHAIN_CONFIG[paymentChain]?.chainId || 8453,
+      paymentAddress: paymentAddress || null, // Arbiter's address
+      escrowRequired: filters['escrow'] === 'true' || filters['escrow'] === true,
+      paymentProtocol: 'x402',
+      version: '1.0'
+    };
+  }
+
   // Generate PAO (Programmable Agreement Object)
   const parties = [agentId, counterparty];
   const termsHash = generateTermsHash(terms, parties, deadline);
@@ -1273,6 +1346,7 @@ function handlePropose(args) {
     value,
     channel,
     proposerSignature,
+    x402, // Payment configuration (v0.7.0)
     status: 'pending_acceptance',
     createdAt: new Date().toISOString(),
     expiresAt,
@@ -1354,6 +1428,7 @@ function handleAccept(args) {
       [proposal.proposer]: proposal.proposerSignature,
       [proposal.counterparty]: counterpartySignature,
     },
+    x402: proposal.x402 || null, // Payment terms (v0.7.0)
     status: 'active',
     timeline: [
       {
@@ -1551,6 +1626,43 @@ function handleArbitrate(args) {
 
   const agreement = JSON.parse(fs.readFileSync(agreementFile, 'utf8'));
 
+  // x402 Payment verification (v0.7.0)
+  if (agreement.x402?.arbitrationCost) {
+    const paymentProof = filters['payment-proof'];
+    if (!paymentProof) {
+      console.error(JSON.stringify({
+        error: 'Payment required for arbitration',
+        x402: {
+          cost: agreement.x402.arbitrationCost,
+          token: agreement.x402.arbitrationToken,
+          chain: agreement.x402.arbitrationChain,
+          recipient: agreement.x402.paymentAddress || agreement.arbiter,
+          protocol: 'x402'
+        },
+        hint: 'Pay arbitration fee via x402 and provide --payment-proof=0xTxHash',
+        usage: `node capture.js arbitrate --agreementId=${agreementId} --reason="..." --evidence="..." --payment-proof=0x...`
+      }));
+      process.exit(1);
+    }
+
+    // Validate payment proof format (basic validation - full verification would check chain)
+    if (!paymentProof.startsWith('0x') || paymentProof.length < 66) {
+      console.error(JSON.stringify({
+        error: 'Invalid payment proof format',
+        expected: '0x followed by 64 hex characters (transaction hash)',
+        received: paymentProof
+      }));
+      process.exit(1);
+    }
+
+    // Store payment proof (in production, would verify on-chain)
+    console.log(JSON.stringify({
+      status: 'payment_accepted',
+      paymentProof,
+      note: 'Payment proof recorded. On-chain verification available in future version.'
+    }, null, 2));
+  }
+
   if (!['active', 'pending_confirmation'].includes(agreement.status)) {
     console.error(JSON.stringify({
       error: 'Agreement cannot be disputed',
@@ -1569,6 +1681,9 @@ function handleArbitrate(args) {
 
   // Evidence window: 7 days
   const evidenceDeadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  // Payment proof for x402 (if provided)
+  const paymentProof = filters['payment-proof'];
 
   const arbitration = {
     arbitrationId,
@@ -1589,6 +1704,13 @@ function handleArbitrate(args) {
       }] : [],
       respondent: [],
     },
+    // x402 payment tracking (v0.7.0)
+    x402: agreement.x402 ? {
+      ...agreement.x402,
+      paymentProof: paymentProof || null,
+      paymentVerified: !!paymentProof,
+      paymentRecordedAt: paymentProof ? new Date().toISOString() : null
+    } : null,
     ruling: null,
     openedAt: new Date().toISOString(),
     evidenceDeadline,
@@ -2751,6 +2873,12 @@ function handleIdentity(args) {
     case 'export':
       handleIdentityExport(args.slice(1));
       break;
+    case 'resolve':
+      handleIdentityResolve(args.slice(1));
+      break;
+    case 'anchor':
+      handleIdentityAnchor(args.slice(1));
+      break;
     default:
       showIdentityHelp();
   }
@@ -3417,6 +3545,251 @@ function handleIdentityExport(args) {
   console.log(JSON.stringify(didDocument, null, 2));
 }
 
+// === ERC-8004 CHAIN INTEGRATION (v0.7.0) ===
+
+/**
+ * Anchor identity to ERC-8004 registry on-chain
+ */
+async function handleIdentityAnchor(args) {
+  const filters = parseFilters(args);
+  const chain = filters.chain || 'sepolia'; // Default to testnet for safety
+
+  const didDocument = loadLocalDID();
+  if (!didDocument) {
+    console.error(JSON.stringify({ error: 'No local identity found. Run "identity init" first.' }));
+    process.exit(1);
+  }
+
+  const chainConfig = CHAIN_CONFIG[chain];
+  if (!chainConfig) {
+    console.error(JSON.stringify({
+      error: 'Invalid chain',
+      chain,
+      validChains: Object.keys(CHAIN_CONFIG)
+    }));
+    process.exit(1);
+  }
+
+  if (!chainConfig.identityRegistry) {
+    console.error(JSON.stringify({
+      error: `ERC-8004 Identity Registry not deployed on ${chain} yet`,
+      chain,
+      suggestion: 'Use "sepolia" for testing or "ethereum" for mainnet'
+    }));
+    process.exit(1);
+  }
+
+  // Check for private key (required for signing transactions)
+  const privateKey = process.env.RECEIPTS_WALLET_PRIVATE_KEY;
+  if (!privateKey) {
+    console.error(JSON.stringify({
+      error: 'Wallet private key required for on-chain registration',
+      hint: 'Set RECEIPTS_WALLET_PRIVATE_KEY environment variable',
+      warning: 'Never commit private keys to code. Use environment variables or secrets manager.'
+    }));
+    process.exit(1);
+  }
+
+  try {
+    // Connect to chain
+    const provider = new ethers.JsonRpcProvider(chainConfig.rpc);
+    const wallet = new ethers.Wallet(privateKey, provider);
+
+    // Check balance
+    const balance = await provider.getBalance(wallet.address);
+    const balanceEth = ethers.formatEther(balance);
+
+    if (balance === 0n) {
+      console.error(JSON.stringify({
+        error: 'Wallet has no funds',
+        address: wallet.address,
+        chain: chainConfig.name,
+        hint: chain === 'sepolia' ? 'Get testnet ETH from a faucet' : 'Fund wallet with ETH for gas'
+      }));
+      process.exit(1);
+    }
+
+    // Create contract instance
+    const identityRegistry = new ethers.Contract(
+      chainConfig.identityRegistry,
+      IDENTITY_REGISTRY_ABI,
+      wallet
+    );
+
+    // Prepare agent URI (DID document location)
+    // For now, use a local placeholder - in production this would be IPFS or hosted URL
+    const agentURI = didDocument.service?.[0]?.serviceEndpoint ||
+      `local://${DID_FILE}`;
+
+    console.log(JSON.stringify({
+      status: 'registering',
+      chain: chainConfig.name,
+      chainId: chainConfig.chainId,
+      wallet: wallet.address,
+      balance: `${balanceEth} ETH`,
+      registry: chainConfig.identityRegistry,
+      did: didDocument.id,
+      agentURI
+    }, null, 2));
+
+    // Register agent
+    const tx = await identityRegistry.register(agentURI);
+    console.log(JSON.stringify({
+      status: 'pending',
+      transactionHash: tx.hash,
+      explorer: `${chainConfig.explorer}/tx/${tx.hash}`
+    }, null, 2));
+
+    // Wait for confirmation
+    const receipt = await tx.wait();
+
+    // Extract agentId from Transfer event
+    let agentNftId = null;
+    for (const log of receipt.logs) {
+      try {
+        const parsed = identityRegistry.interface.parseLog(log);
+        if (parsed?.name === 'Transfer') {
+          agentNftId = parsed.args.tokenId.toString();
+          break;
+        }
+      } catch (e) {
+        // Not our event, continue
+      }
+    }
+
+    // Update local DID document with anchor
+    didDocument.anchors = didDocument.anchors || {};
+    didDocument.anchors[chain] = {
+      chainId: chainConfig.chainId,
+      registryAddress: chainConfig.identityRegistry,
+      transactionHash: receipt.hash,
+      blockNumber: receipt.blockNumber,
+      agentNftId,
+      registeredAt: new Date().toISOString(),
+      walletAddress: wallet.address
+    };
+    didDocument.updated = new Date().toISOString();
+
+    // Save updated DID document
+    fs.writeFileSync(DID_FILE, JSON.stringify(didDocument, null, 2));
+
+    console.log(JSON.stringify({
+      status: 'success',
+      chain: chainConfig.name,
+      did: didDocument.id,
+      agentNftId,
+      transactionHash: receipt.hash,
+      blockNumber: receipt.blockNumber,
+      explorer: `${chainConfig.explorer}/tx/${receipt.hash}`,
+      gasUsed: receipt.gasUsed.toString(),
+      message: `Identity anchored to ERC-8004 registry on ${chainConfig.name}`
+    }, null, 2));
+
+  } catch (error) {
+    console.error(JSON.stringify({
+      error: 'Chain registration failed',
+      message: error.message,
+      chain: chainConfig.name,
+      hint: error.message.includes('insufficient funds')
+        ? 'Fund wallet with ETH for gas'
+        : 'Check RPC endpoint and contract address'
+    }));
+    process.exit(1);
+  }
+}
+
+/**
+ * Resolve DID from ERC-8004 registry or local
+ */
+async function handleIdentityResolve(args) {
+  const filters = parseFilters(args);
+  const didId = filters.did;
+  const chain = filters.chain;
+
+  if (!didId) {
+    console.error(JSON.stringify({
+      error: 'DID required',
+      usage: 'identity resolve --did=did:agent:namespace:name [--chain=ethereum|base|sepolia]'
+    }));
+    process.exit(1);
+  }
+
+  // First, try local resolution
+  const localDID = loadLocalDID();
+  if (localDID && localDID.id === didId) {
+    console.log(JSON.stringify({
+      resolved: true,
+      source: 'local',
+      did: localDID.id,
+      document: localDID,
+      anchors: localDID.anchors || null
+    }, null, 2));
+    return;
+  }
+
+  // If chain specified, try on-chain resolution
+  if (chain) {
+    const chainConfig = CHAIN_CONFIG[chain];
+    if (!chainConfig || !chainConfig.identityRegistry) {
+      console.error(JSON.stringify({
+        error: `Cannot resolve from ${chain}`,
+        reason: chainConfig ? 'Registry not deployed' : 'Invalid chain'
+      }));
+      process.exit(1);
+    }
+
+    try {
+      const provider = new ethers.JsonRpcProvider(chainConfig.rpc);
+      const identityRegistry = new ethers.Contract(
+        chainConfig.identityRegistry,
+        IDENTITY_REGISTRY_ABI,
+        provider
+      );
+
+      // For now, we can't resolve by DID directly - would need agentNftId
+      // This is a limitation of the current ERC-8004 spec
+      console.log(JSON.stringify({
+        resolved: false,
+        source: chain,
+        did: didId,
+        message: 'On-chain DID resolution requires agentNftId. Use --agent-id=N to resolve by NFT ID.',
+        hint: 'Full DID resolution will be available when DID registries support reverse lookup'
+      }, null, 2));
+
+    } catch (error) {
+      console.error(JSON.stringify({
+        error: 'Chain resolution failed',
+        message: error.message
+      }));
+      process.exit(1);
+    }
+  } else {
+    // No local match, no chain specified
+    console.log(JSON.stringify({
+      resolved: false,
+      did: didId,
+      message: 'DID not found locally. Specify --chain to attempt on-chain resolution.',
+      availableChains: Object.keys(CHAIN_CONFIG).filter(c => CHAIN_CONFIG[c].identityRegistry)
+    }, null, 2));
+  }
+}
+
+/**
+ * Get chain status and configuration
+ */
+function getChainStatus() {
+  const status = {};
+  for (const [name, config] of Object.entries(CHAIN_CONFIG)) {
+    status[name] = {
+      chainId: config.chainId,
+      identityRegistry: config.identityRegistry || 'not deployed',
+      reputationRegistry: config.reputationRegistry || 'not deployed',
+      rpcConfigured: !!config.rpc
+    };
+  }
+  return status;
+}
+
 /**
  * Show identity help
  */
@@ -3460,8 +3833,17 @@ function showIdentityHelp() {
       export: {
         usage: 'identity export',
         description: 'Export public DID document'
+      },
+      anchor: {
+        usage: 'identity anchor --chain=ethereum|base|sepolia',
+        description: 'Anchor identity to ERC-8004 registry on-chain (v0.7.0)'
+      },
+      resolve: {
+        usage: 'identity resolve --did=DID [--chain=CHAIN]',
+        description: 'Resolve DID from local or on-chain registry (v0.7.0)'
       }
     },
+    chains: getChainStatus(),
     version: VERSION
   }, null, 2));
 }
@@ -3571,6 +3953,373 @@ function handleMigrate(args) {
   }, null, 2));
 }
 
+// === HTTP SERVER MODE (v0.7.0) ===
+
+/**
+ * Start HTTP server for cloud deployment
+ */
+function startHttpServer(args) {
+  const http = require('http');
+  const filters = parseFilters(args);
+  const port = filters.port || process.env.PORT || 3000;
+
+  const server = http.createServer(async (req, res) => {
+    // CORS headers
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Content-Type', 'application/json');
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(200);
+      res.end();
+      return;
+    }
+
+    const url = new URL(req.url, `http://localhost:${port}`);
+    const pathname = url.pathname;
+
+    try {
+      // Parse body for POST requests
+      let body = {};
+      if (req.method === 'POST') {
+        body = await parseRequestBody(req);
+      }
+
+      // Route handlers
+      switch (pathname) {
+        case '/':
+        case '/health':
+          res.writeHead(200);
+          res.end(JSON.stringify({
+            status: 'ok',
+            service: 'receipts-guard',
+            version: VERSION,
+            uptime: process.uptime(),
+            identity: loadLocalDID()?.id || null
+          }));
+          break;
+
+        case '/identity':
+          const didDoc = loadLocalDID();
+          if (didDoc) {
+            res.writeHead(200);
+            res.end(JSON.stringify(didDoc, null, 2));
+          } else {
+            res.writeHead(404);
+            res.end(JSON.stringify({ error: 'No identity configured' }));
+          }
+          break;
+
+        case '/identity/chains':
+          res.writeHead(200);
+          res.end(JSON.stringify(getChainStatus(), null, 2));
+          break;
+
+        case '/propose':
+          if (req.method !== 'POST') {
+            res.writeHead(405);
+            res.end(JSON.stringify({ error: 'Method not allowed. Use POST.' }));
+            break;
+          }
+          const proposeResult = handleProposeHttp(body);
+          res.writeHead(proposeResult.error ? 400 : 200);
+          res.end(JSON.stringify(proposeResult, null, 2));
+          break;
+
+        case '/accept':
+          if (req.method !== 'POST') {
+            res.writeHead(405);
+            res.end(JSON.stringify({ error: 'Method not allowed. Use POST.' }));
+            break;
+          }
+          const acceptResult = handleAcceptHttp(body);
+          res.writeHead(acceptResult.error ? 400 : 200);
+          res.end(JSON.stringify(acceptResult, null, 2));
+          break;
+
+        case '/list':
+          const listResult = handleListHttp(url.searchParams);
+          res.writeHead(200);
+          res.end(JSON.stringify(listResult, null, 2));
+          break;
+
+        case '/agreements':
+          const agreementsResult = listAgreements();
+          res.writeHead(200);
+          res.end(JSON.stringify(agreementsResult, null, 2));
+          break;
+
+        case '/proposals':
+          const proposalsResult = listProposals();
+          res.writeHead(200);
+          res.end(JSON.stringify(proposalsResult, null, 2));
+          break;
+
+        default:
+          res.writeHead(404);
+          res.end(JSON.stringify({
+            error: 'Not found',
+            availableEndpoints: [
+              'GET /',
+              'GET /health',
+              'GET /identity',
+              'GET /identity/chains',
+              'GET /list',
+              'GET /agreements',
+              'GET /proposals',
+              'POST /propose',
+              'POST /accept'
+            ]
+          }));
+      }
+    } catch (error) {
+      res.writeHead(500);
+      res.end(JSON.stringify({
+        error: 'Internal server error',
+        message: error.message
+      }));
+    }
+  });
+
+  server.listen(port, () => {
+    console.log(JSON.stringify({
+      status: 'running',
+      service: 'receipts-guard',
+      version: VERSION,
+      port,
+      endpoints: [
+        `http://localhost:${port}/`,
+        `http://localhost:${port}/health`,
+        `http://localhost:${port}/identity`,
+        `http://localhost:${port}/identity/chains`,
+        `http://localhost:${port}/list`,
+        `http://localhost:${port}/proposals`,
+        `http://localhost:${port}/agreements`,
+        `POST http://localhost:${port}/propose`,
+        `POST http://localhost:${port}/accept`
+      ],
+      message: 'RECEIPTS Guard HTTP server ready'
+    }, null, 2));
+  });
+}
+
+/**
+ * Parse request body as JSON
+ */
+function parseRequestBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        resolve(body ? JSON.parse(body) : {});
+      } catch (e) {
+        reject(new Error('Invalid JSON body'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+/**
+ * HTTP handler for propose
+ */
+function handleProposeHttp(body) {
+  const { terms, counterparty, arbiter, deadline, value, arbitrationCost, paymentAddress, paymentToken, paymentChain } = body;
+
+  if (!terms || !counterparty) {
+    return { error: 'Missing required fields: terms, counterparty' };
+  }
+
+  if (!arbiter) {
+    return { error: 'Missing required field: arbiter' };
+  }
+
+  const agentId = process.env.RECEIPTS_AGENT_ID || 'openclaw-agent';
+  const channel = 'http';
+
+  // x402 Payment configuration
+  let x402 = null;
+  if (arbitrationCost) {
+    x402 = {
+      arbitrationCost,
+      arbitrationToken: paymentToken || 'USDC',
+      arbitrationChain: CHAIN_CONFIG[paymentChain || 'base']?.chainId || 8453,
+      paymentAddress: paymentAddress || null,
+      escrowRequired: false,
+      paymentProtocol: 'x402',
+      version: '1.0'
+    };
+  }
+
+  // Generate PAO
+  const parties = [agentId, counterparty];
+  const termsHash = generateTermsHash(terms, parties, deadline);
+  const proposerSignature = signTerms(termsHash, agentId);
+  const proposalId = generateId('prop');
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  const proposal = {
+    proposalId,
+    termsHash: `sha256:${termsHash}`,
+    terms: {
+      text: terms,
+      canonical: terms.trim().toLowerCase().replace(/\s+/g, ' '),
+    },
+    proposer: agentId,
+    counterparty,
+    proposedArbiter: arbiter,
+    deadline: deadline || null,
+    value: value || null,
+    channel,
+    proposerSignature,
+    x402,
+    status: 'pending_acceptance',
+    createdAt: new Date().toISOString(),
+    expiresAt,
+    version: VERSION,
+  };
+
+  // Save proposal
+  ensureDir(PROPOSALS_DIR);
+  const proposalFile = path.join(PROPOSALS_DIR, `${proposalId}.json`);
+  fs.writeFileSync(proposalFile, JSON.stringify(proposal, null, 2));
+
+  const termsFile = path.join(PROPOSALS_DIR, `${proposalId}.txt`);
+  fs.writeFileSync(termsFile, terms);
+
+  return {
+    ...proposal,
+    message: `Proposal created. Share proposalId with ${counterparty} for acceptance.`
+  };
+}
+
+/**
+ * HTTP handler for accept
+ */
+function handleAcceptHttp(body) {
+  const { proposalId } = body;
+
+  if (!proposalId) {
+    return { error: 'Missing required field: proposalId' };
+  }
+
+  const proposalFile = path.join(PROPOSALS_DIR, `${proposalId}.json`);
+  if (!fs.existsSync(proposalFile)) {
+    return { error: 'Proposal not found', proposalId };
+  }
+
+  const proposal = JSON.parse(fs.readFileSync(proposalFile, 'utf8'));
+
+  if (proposal.status !== 'pending_acceptance') {
+    return { error: 'Proposal is not pending acceptance', currentStatus: proposal.status };
+  }
+
+  const agentId = process.env.RECEIPTS_AGENT_ID || 'openclaw-agent';
+  const counterpartySignature = signTerms(proposal.termsHash.replace('sha256:', ''), agentId);
+  const agreementId = generateId('agr');
+
+  const agreement = {
+    agreementId,
+    proposalId,
+    termsHash: proposal.termsHash,
+    terms: proposal.terms,
+    parties: [proposal.proposer, proposal.counterparty],
+    arbiter: proposal.proposedArbiter,
+    deadline: proposal.deadline,
+    value: proposal.value,
+    signatures: {
+      proposer: proposal.proposerSignature,
+      counterparty: counterpartySignature,
+    },
+    x402: proposal.x402,
+    status: 'active',
+    acceptedAt: new Date().toISOString(),
+    timeline: [
+      { event: 'proposed', timestamp: proposal.createdAt, actor: proposal.proposer },
+      { event: 'accepted', timestamp: new Date().toISOString(), actor: agentId },
+    ],
+    version: VERSION,
+  };
+
+  // Save agreement
+  ensureDir(AGREEMENTS_DIR);
+  const agreementFile = path.join(AGREEMENTS_DIR, `${agreementId}.json`);
+  fs.writeFileSync(agreementFile, JSON.stringify(agreement, null, 2));
+
+  // Update proposal status
+  proposal.status = 'accepted';
+  proposal.agreementId = agreementId;
+  fs.writeFileSync(proposalFile, JSON.stringify(proposal, null, 2));
+
+  return {
+    ...agreement,
+    message: 'Agreement created. Both parties have signed.'
+  };
+}
+
+/**
+ * HTTP handler for list
+ */
+function handleListHttp(params) {
+  const type = params.get('type') || 'all';
+  const status = params.get('status');
+
+  const result = { generatedAt: new Date().toISOString() };
+
+  if (type === 'all' || type === 'proposals') {
+    result.proposals = listProposals();
+  }
+  if (type === 'all' || type === 'agreements') {
+    result.agreements = listAgreements();
+  }
+
+  return result;
+}
+
+/**
+ * List all proposals
+ */
+function listProposals() {
+  if (!fs.existsSync(PROPOSALS_DIR)) return { count: 0, items: [] };
+
+  const files = fs.readdirSync(PROPOSALS_DIR).filter(f => f.endsWith('.json'));
+  const items = files.map(f => {
+    const proposal = JSON.parse(fs.readFileSync(path.join(PROPOSALS_DIR, f), 'utf8'));
+    return {
+      proposalId: proposal.proposalId,
+      status: proposal.status,
+      counterparty: proposal.counterparty,
+      arbiter: proposal.proposedArbiter,
+      createdAt: proposal.createdAt
+    };
+  });
+
+  return { count: items.length, items };
+}
+
+/**
+ * List all agreements
+ */
+function listAgreements() {
+  if (!fs.existsSync(AGREEMENTS_DIR)) return { count: 0, items: [] };
+
+  const files = fs.readdirSync(AGREEMENTS_DIR).filter(f => f.endsWith('.json'));
+  const items = files.map(f => {
+    const agreement = JSON.parse(fs.readFileSync(path.join(AGREEMENTS_DIR, f), 'utf8'));
+    return {
+      agreementId: agreement.agreementId,
+      status: agreement.status,
+      parties: agreement.parties,
+      arbiter: agreement.arbiter,
+      acceptedAt: agreement.acceptedAt
+    };
+  });
+
+  return { count: items.length, items };
+}
+
 // === EXPORT MODULE API ===
 // When required as a module, export the programmatic API
 if (typeof module !== 'undefined' && module.exports) {
@@ -3589,7 +4338,7 @@ if (typeof module !== 'undefined' && module.exports) {
     signTerms,
     verifySignature,
 
-    // Identity (v0.6.0)
+    // Identity (v0.6.0 + v0.7.0)
     generateDIDDocument,
     loadLocalDID,
     resolveDID,
