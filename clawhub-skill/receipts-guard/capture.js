@@ -1198,11 +1198,19 @@ function verifySignature(termsHash, signature, agentIdOrDID) {
 }
 
 /**
- * Ensure a subdirectory exists
+ * Ensure a subdirectory exists with optional restricted permissions
  */
-function ensureDir(dirPath) {
+function ensureDir(dirPath, restrictedMode = false) {
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
+  }
+  // Apply restricted permissions for sensitive directories
+  if (restrictedMode) {
+    try {
+      fs.chmodSync(dirPath, 0o700); // Owner only: rwx------
+    } catch (e) {
+      // Windows doesn't support chmod
+    }
   }
 }
 
@@ -2792,11 +2800,11 @@ function handleIdentityInit(args) {
     controllerConfig
   );
 
-  // Create directory structure
+  // Create directory structure with restricted permissions for sensitive dirs
   ensureDir(IDENTITY_DIR);
-  ensureDir(PRIVATE_KEY_DIR);
-  ensureDir(KEY_ARCHIVE_DIR);
-  ensureDir(RECOVERY_DIR);
+  ensureDir(PRIVATE_KEY_DIR, true);    // Restricted: 700
+  ensureDir(KEY_ARCHIVE_DIR, true);    // Restricted: 700
+  ensureDir(RECOVERY_DIR, true);       // Restricted: 700
 
   // Save DID document (public)
   fs.writeFileSync(DID_FILE, JSON.stringify(document, null, 2));
@@ -2943,15 +2951,19 @@ function handleIdentityRotate(args) {
     }
   };
 
-  // Archive old key
+  // Archive old key with restricted permissions
+  const archiveFilePath = path.join(KEY_ARCHIVE_DIR, `${currentKeyData.keyId.replace('#', '')}.json`);
   fs.writeFileSync(
-    path.join(KEY_ARCHIVE_DIR, `${currentKeyData.keyId.replace('#', '')}.json`),
+    archiveFilePath,
     JSON.stringify({
       ...currentKeyData,
       archivedAt: rotationData.rotatedAt,
       rotatedTo: newKeypair.keyId
     }, null, 2)
   );
+  try {
+    fs.chmodSync(archiveFilePath, 0o600); // Owner read/write only
+  } catch (e) {}
 
   // Update DID document
   const newVerificationMethod = {
