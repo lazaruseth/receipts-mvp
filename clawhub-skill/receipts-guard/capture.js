@@ -66,6 +66,9 @@ const fs = require('fs');
 const path = require('path');
 const { ethers } = require('ethers');
 
+// Trust Manifold (v0.9.0)
+const manifold = require('./lib/manifold');
+
 // Receipts directory
 const RECEIPTS_DIR = path.join(
   process.env.HOME || process.env.USERPROFILE,
@@ -77,7 +80,7 @@ const RECEIPTS_DIR = path.join(
 const INDEX_FILE = path.join(RECEIPTS_DIR, 'index.json');
 
 // Version
-const VERSION = '0.8.0';
+const VERSION = '0.9.0';
 
 // Arbitration directories
 const PROPOSALS_DIR = path.join(RECEIPTS_DIR, 'proposals');
@@ -300,6 +303,16 @@ switch (command) {
   // === HTTP SERVER MODE (v0.7.0) ===
   case 'serve':
     startHttpServer(args.slice(1));
+    break;
+  // === TRUST MANIFOLD (v0.9.0) ===
+  case 'manifold':
+    handleManifold(args.slice(1));
+    break;
+  case 'position':
+    handlePosition(args.slice(1));
+    break;
+  case 'trust':
+    handleTrust(args.slice(1));
     break;
   default:
     // Legacy mode: if first arg looks like document text, treat as capture
@@ -995,6 +1008,22 @@ EXAMPLES
 
   # View timeline
   node capture.js timeline --agreementId=agr_xyz789
+
+═══════════════════════════════════════════════════════════════════════════════
+TRUST MANIFOLD (v0.9.0)
+═══════════════════════════════════════════════════════════════════════════════
+
+  manifold stats                    Show manifold network statistics
+  manifold migrate                  Migrate legacy agreements to edges
+  manifold sybil                    Detect suspected Sybil clusters
+  manifold edges [--limit=N]        List all edges in the manifold
+
+  position [--did=X]                Get agent's position in the manifold
+  position top [--limit=N]          Get top agents by position
+  position impact --counterparty=X  Analyze relationship impact
+
+  trust [--did=X]                   Get comprehensive trust profile
+  trust compare --dids=X,Y,Z        Compare multiple agents' trust profiles
 
 ═══════════════════════════════════════════════════════════════════════════════
 ENVIRONMENT
@@ -7878,6 +7907,442 @@ async function verifyX402Payment(txHash, x402Config) {
       error: error.message
     };
   }
+}
+
+// === TRUST MANIFOLD (v0.9.0) ===
+// The geometric substrate where agents exist as positions in relationship-space
+
+/**
+ * Handle manifold subcommands.
+ *
+ * Commands:
+ *   manifold stats          Show manifold statistics
+ *   manifold migrate        Migrate agreements to edges
+ *   manifold sybil          Detect Sybil clusters
+ *   manifold edges          List all edges
+ */
+function handleManifold(args) {
+  const subcommand = args[0];
+  const filters = parseFilters(args.slice(1));
+
+  switch (subcommand) {
+    case 'stats':
+      handleManifoldStats(filters);
+      break;
+    case 'migrate':
+      handleManifoldMigrate(filters);
+      break;
+    case 'sybil':
+      handleManifoldSybil(filters);
+      break;
+    case 'edges':
+      handleManifoldEdges(filters);
+      break;
+    default:
+      console.log(JSON.stringify({
+        error: 'Unknown manifold subcommand',
+        usage: 'node capture.js manifold [stats|migrate|sybil|edges]',
+        commands: {
+          stats: 'Show manifold statistics',
+          migrate: 'Migrate legacy agreements to edges',
+          sybil: 'Detect suspected Sybil clusters',
+          edges: 'List all edges in the manifold'
+        }
+      }, null, 2));
+  }
+}
+
+function handleManifoldStats(filters) {
+  try {
+    const stats = manifold.getManifoldStats();
+    console.log(JSON.stringify({
+      manifoldStats: stats,
+      computed: new Date().toISOString()
+    }, null, 2));
+  } catch (error) {
+    console.error(JSON.stringify({
+      error: 'Failed to compute manifold stats',
+      message: error.message
+    }));
+  }
+}
+
+function handleManifoldMigrate(filters) {
+  // Load all existing agreements
+  const agreementFiles = fs.existsSync(AGREEMENTS_DIR)
+    ? fs.readdirSync(AGREEMENTS_DIR).filter(f => f.endsWith('.json'))
+    : [];
+
+  if (agreementFiles.length === 0) {
+    console.log(JSON.stringify({
+      message: 'No agreements found to migrate',
+      agreementsDir: AGREEMENTS_DIR
+    }, null, 2));
+    return;
+  }
+
+  const identity = loadLocalDID();
+  const privateKeyData = loadPrivateKey();
+  const signFn = (message) => {
+    if (identity && privateKeyData) {
+      // Use signTerms which handles Ed25519 signing
+      const messageHash = crypto.createHash('sha256').update(message).digest('hex');
+      return signTerms(messageHash, identity.id);
+    }
+    // Legacy fallback
+    return `hmac:${crypto.createHmac('sha256', 'migration').update(message).digest('hex')}`;
+  };
+
+  const migrated = [];
+  const errors = [];
+
+  agreementFiles.forEach(file => {
+    try {
+      const agreement = JSON.parse(fs.readFileSync(path.join(AGREEMENTS_DIR, file), 'utf8'));
+
+      // Skip if already migrated (has edge reference)
+      if (agreement.edgeId) {
+        return;
+      }
+
+      // Convert to edge
+      const edge = manifold.agreementToEdge(agreement, signFn);
+      manifold.saveEdge(edge);
+
+      // Update agreement with edge reference
+      agreement.edgeId = edge.edgeId;
+      agreement.migratedToManifold = new Date().toISOString();
+      fs.writeFileSync(path.join(AGREEMENTS_DIR, file), JSON.stringify(agreement, null, 2));
+
+      migrated.push({
+        agreementId: agreement.agreementId,
+        edgeId: edge.edgeId,
+        parties: agreement.parties
+      });
+    } catch (error) {
+      errors.push({
+        file,
+        error: error.message
+      });
+    }
+  });
+
+  console.log(JSON.stringify({
+    migrated: migrated.length,
+    errors: errors.length,
+    details: migrated,
+    errorDetails: errors.length > 0 ? errors : undefined
+  }, null, 2));
+}
+
+function handleManifoldSybil(filters) {
+  try {
+    const stats = manifold.getManifoldStats();
+
+    console.log(JSON.stringify({
+      sybilAnalysis: {
+        totalAgents: stats.uniqueAgents,
+        suspectedClusters: stats.suspectedSybilClusters,
+        clusters: stats.sybilClusters
+      },
+      note: stats.suspectedSybilClusters === 0
+        ? 'No Sybil clusters detected. Network appears healthy.'
+        : 'Suspected Sybil clusters found. Review recommended.',
+      computed: new Date().toISOString()
+    }, null, 2));
+  } catch (error) {
+    console.error(JSON.stringify({
+      error: 'Failed to analyze Sybil clusters',
+      message: error.message
+    }));
+  }
+}
+
+function handleManifoldEdges(filters) {
+  try {
+    const edges = manifold.loadAllEdges();
+    const limit = parseInt(filters.limit) || 50;
+
+    console.log(JSON.stringify({
+      totalEdges: edges.length,
+      showing: Math.min(limit, edges.length),
+      edges: edges.slice(0, limit).map(e => ({
+        edgeId: e.edgeId,
+        from: e.from,
+        to: e.to,
+        type: e.type,
+        state: e.state,
+        weight: e.weight.current,
+        effectiveWeight: manifold.computeEffectiveWeight(e),
+        created: new Date(e.created).toISOString(),
+        isBilateral: manifold.isBilateral(e)
+      }))
+    }, null, 2));
+  } catch (error) {
+    console.error(JSON.stringify({
+      error: 'Failed to list edges',
+      message: error.message
+    }));
+  }
+}
+
+/**
+ * Handle position queries.
+ *
+ * Commands:
+ *   position [--did=X]      Get agent's position in the manifold
+ *   position top [--limit=N] Get top agents by position
+ *   position impact --counterparty=DID  Analyze relationship impact
+ */
+function handlePosition(args) {
+  const filters = parseFilters(args);
+  const subcommand = args.find(a => !a.startsWith('--'));
+
+  if (subcommand === 'top') {
+    handlePositionTop(filters);
+  } else if (subcommand === 'impact') {
+    handlePositionImpact(filters);
+  } else {
+    handlePositionQuery(filters);
+  }
+}
+
+function handlePositionQuery(filters) {
+  try {
+    const identity = loadLocalDID();
+    const agentDid = filters.did || (identity ? identity.id : null);
+
+    if (!agentDid) {
+      console.error(JSON.stringify({
+        error: 'No DID specified and no identity found',
+        usage: 'node capture.js position --did=did:agent:xxx',
+        hint: 'Run "node capture.js identity init" to create an identity'
+      }));
+      return;
+    }
+
+    const positionData = manifold.getAgentPosition(agentDid);
+
+    console.log(JSON.stringify({
+      agentDid,
+      position: positionData.position,
+      rank: positionData.rank,
+      percentile: positionData.percentile,
+      cached: positionData.cached,
+      computedAt: new Date(positionData.computedAt).toISOString(),
+      interpretation: interpretPosition(positionData)
+    }, null, 2));
+  } catch (error) {
+    console.error(JSON.stringify({
+      error: 'Failed to compute position',
+      message: error.message
+    }));
+  }
+}
+
+function handlePositionTop(filters) {
+  try {
+    const limit = parseInt(filters.limit) || 10;
+    const topAgents = manifold.getTopAgents(limit);
+
+    console.log(JSON.stringify({
+      topAgents,
+      totalAgents: manifold.getManifoldStats().uniqueAgents,
+      computed: new Date().toISOString()
+    }, null, 2));
+  } catch (error) {
+    console.error(JSON.stringify({
+      error: 'Failed to get top agents',
+      message: error.message
+    }));
+  }
+}
+
+function handlePositionImpact(filters) {
+  try {
+    const identity = loadLocalDID();
+    const agentDid = filters.did || (identity ? identity.id : null);
+    const counterpartyDid = filters.counterparty;
+
+    if (!agentDid || !counterpartyDid) {
+      console.error(JSON.stringify({
+        error: 'Missing required parameters',
+        usage: 'node capture.js position impact --counterparty=did:agent:xxx [--did=did:agent:yyy]'
+      }));
+      return;
+    }
+
+    const impact = manifold.analyzeRelationshipImpact(agentDid, counterpartyDid);
+
+    console.log(JSON.stringify({
+      agent: agentDid,
+      counterparty: counterpartyDid,
+      analysis: {
+        currentPosition: impact.currentPosition,
+        projectedPosition: impact.projectedPosition,
+        absoluteChange: impact.absoluteChange,
+        percentageChange: impact.percentageChange === Infinity ? 'N/A (from zero)' : `${impact.percentageChange.toFixed(2)}%`,
+        counterpartyPosition: impact.counterpartyPosition,
+        recommendation: impact.recommendation
+      },
+      interpretation: interpretImpact(impact)
+    }, null, 2));
+  } catch (error) {
+    console.error(JSON.stringify({
+      error: 'Failed to analyze position impact',
+      message: error.message
+    }));
+  }
+}
+
+function interpretPosition(positionData) {
+  if (positionData.position === 0) {
+    return 'Agent has no position in the manifold (no bilateral edges)';
+  }
+  if (positionData.percentile >= 90) {
+    return 'Top 10% - Highly connected and trusted agent';
+  }
+  if (positionData.percentile >= 75) {
+    return 'Top 25% - Well-established agent with strong relationships';
+  }
+  if (positionData.percentile >= 50) {
+    return 'Median position - Average connectivity in the manifold';
+  }
+  if (positionData.percentile >= 25) {
+    return 'Below median - Limited relationships, building trust';
+  }
+  return 'Low position - New or isolated agent in the manifold';
+}
+
+function interpretImpact(impact) {
+  if (impact.counterpartyPosition === 0) {
+    return 'Warning: Counterparty has zero position. Relationship would not improve your position.';
+  }
+  if (impact.recommendation === 'beneficial') {
+    return `Beneficial: Would improve your position by ${impact.absoluteChange.toFixed(6)}`;
+  }
+  return 'Neutral/negative: This relationship would not significantly improve your position';
+}
+
+/**
+ * Handle trust profile queries.
+ *
+ * Commands:
+ *   trust [--did=X]         Get comprehensive trust profile
+ *   trust compare --dids=X,Y,Z  Compare multiple agents
+ */
+function handleTrust(args) {
+  const filters = parseFilters(args);
+  const subcommand = args.find(a => !a.startsWith('--'));
+
+  if (subcommand === 'compare') {
+    handleTrustCompare(filters);
+  } else {
+    handleTrustProfile(filters);
+  }
+}
+
+function handleTrustProfile(filters) {
+  try {
+    const identity = loadLocalDID();
+    const agentDid = filters.did || (identity ? identity.id : null);
+
+    if (!agentDid) {
+      console.error(JSON.stringify({
+        error: 'No DID specified and no identity found',
+        usage: 'node capture.js trust --did=did:agent:xxx'
+      }));
+      return;
+    }
+
+    const profile = manifold.getAgentTrustProfile(agentDid);
+
+    console.log(JSON.stringify({
+      trustProfile: {
+        agentDid: profile.agentDid,
+        position: profile.position,
+        edges: profile.edges,
+        totalEffectiveWeight: profile.totalEffectiveWeight,
+        fulfillmentRate: profile.fulfillmentRate !== null
+          ? `${(profile.fulfillmentRate * 100).toFixed(1)}%`
+          : 'N/A (no completed edges)',
+        counterpartyCount: profile.counterpartyCount,
+        oldestRelationship: profile.oldestRelationship
+      },
+      interpretation: interpretTrustProfile(profile)
+    }, null, 2));
+  } catch (error) {
+    console.error(JSON.stringify({
+      error: 'Failed to get trust profile',
+      message: error.message
+    }));
+  }
+}
+
+function handleTrustCompare(filters) {
+  try {
+    const didsStr = filters.dids;
+    if (!didsStr) {
+      console.error(JSON.stringify({
+        error: 'Missing DIDs to compare',
+        usage: 'node capture.js trust compare --dids=did:agent:xxx,did:agent:yyy'
+      }));
+      return;
+    }
+
+    const dids = didsStr.split(',').map(d => d.trim());
+    const profiles = manifold.compareTrustProfiles(dids);
+
+    console.log(JSON.stringify({
+      comparison: profiles.map(p => ({
+        agentDid: p.agentDid,
+        position: p.position.position,
+        rank: p.position.rank,
+        percentile: p.position.percentile,
+        totalEdges: p.edges.total,
+        fulfillmentRate: p.fulfillmentRate,
+        totalWeight: p.totalEffectiveWeight
+      })),
+      computed: new Date().toISOString()
+    }, null, 2));
+  } catch (error) {
+    console.error(JSON.stringify({
+      error: 'Failed to compare trust profiles',
+      message: error.message
+    }));
+  }
+}
+
+function interpretTrustProfile(profile) {
+  const interpretations = [];
+
+  if (profile.edges.total === 0) {
+    return ['Agent has no edges - not yet participating in the manifold'];
+  }
+
+  if (profile.fulfillmentRate !== null && profile.fulfillmentRate >= 0.9) {
+    interpretations.push('Excellent fulfillment rate (90%+) - highly reliable');
+  } else if (profile.fulfillmentRate !== null && profile.fulfillmentRate < 0.5) {
+    interpretations.push('Low fulfillment rate - caution advised');
+  }
+
+  if (profile.counterpartyCount >= 10) {
+    interpretations.push('Diverse counterparty network - not dependent on single relationships');
+  } else if (profile.counterpartyCount <= 2) {
+    interpretations.push('Limited counterparty diversity - concentrated relationships');
+  }
+
+  if (profile.oldestRelationship && profile.oldestRelationship.ageDays > 365) {
+    interpretations.push(`Long-standing presence (${profile.oldestRelationship.ageDays} days) - established agent`);
+  } else if (profile.oldestRelationship && profile.oldestRelationship.ageDays < 30) {
+    interpretations.push('New to the manifold - building reputation');
+  }
+
+  if (profile.edges.disputed > profile.edges.total * 0.2) {
+    interpretations.push('High dispute ratio - review history carefully');
+  }
+
+  return interpretations.length > 0 ? interpretations : ['Standard trust profile'];
 }
 
 // === HTTP SERVER MODE (v0.7.0) ===

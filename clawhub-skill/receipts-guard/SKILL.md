@@ -1,23 +1,68 @@
 ---
 name: receipts-guard
-description: ERC-8004 identity, x402 payments, and arbitration protocol for autonomous agent commerce. The three rails for the machine economy.
-metadata: {"openclaw":{"emoji":"⚖️","requires":{"anyBins":["node"]},"version":"0.8.0"}}
+description: Trust Manifold substrate for autonomous agent commerce. Edge-based identity, position computation, and Sybil-resistant reputation.
+metadata: {"openclaw":{"emoji":"⚖️","requires":{"anyBins":["node"]},"version":"0.9.0"}}
 ---
 
-# RECEIPTS Guard v0.8.0 - Full Identity Layer
+# RECEIPTS Guard v0.9.0 - Trust Manifold
 
-> "The rails for the machine economy."
+> "Identity is not what you claim. It is the shape you have carved in the space of relationships."
 
-ERC-8004 identity + x402 payments + arbitration protocol. The infrastructure for agent commerce.
+**The Inverse Identity Theorem:** Human identity flows outward from self. Agent identity flows inward from interactions. `Agent Identity = ∫ relationships dt`
 
-**The Three Rails:**
+**The Trust Manifold** is the geometric substrate where agents exist as positions defined by their relationships. This module implements the computable trust layer for the machine economy.
+
+**The Four Rails:**
 | Rail | Standard | Purpose |
 |------|----------|---------|
 | **Identity** | ERC-8004 | On-chain agent identity anchoring |
-| **Trust** | ERC-8004 Reputation | Arbitration outcomes build reputation |
+| **Position** | Trust Manifold | Computed from edges (PageRank-style) |
+| **Trust** | Bilateral Edges | Sybil-resistant relationship primitives |
 | **Payment** | x402 | Paid arbitration, automated settlements |
 
-**Local-first. Chain-anchored. Cloud-deployable. Security-hardened. Identity-layered. Fork-aware. Migration-ready. Credential-enabled.**
+**Local-first. Edge-based. Sybil-resistant. Chain-anchored. Position-computed.**
+
+## What's New in v0.9.0 (Trust Manifold)
+
+- **🔗 Edge Primitives** - Bilateral signed edges as the atomic trust unit
+- **📊 Position Computation** - EigenTrust-style position from edge graph
+- **🛡️ Sybil Detection** - Automatic detection of fake-agent clusters
+- **📈 Trust Profiles** - Comprehensive reputation view with fulfillment rates
+- **🔮 Impact Analysis** - Preview position change before forming relationships
+- **🔄 Agreement Migration** - Convert legacy agreements to edge format
+
+### Core Commands
+```bash
+# View your position in the Trust Manifold
+node capture.js position
+
+# Get comprehensive trust profile
+node capture.js trust
+
+# Analyze potential relationship
+node capture.js position impact --counterparty=did:agent:xxx
+
+# View manifold statistics
+node capture.js manifold stats
+
+# Detect Sybil clusters
+node capture.js manifold sybil
+
+# Migrate agreements to edges
+node capture.js manifold migrate
+```
+
+### The Edge Primitive
+```
+A ───(t, v, h)───► B
+
+Where:
+  t = timestamp
+  v = weight (evolves with interactions)
+  h = hash chain integrity
+```
+
+Edges are **bilateral** - both parties must sign. This defeats Sybil attacks because fake agents have no real counterparties, so edges from them have zero effective weight.
 
 ## What's New in v0.8.0 (Full Identity Layer)
 
