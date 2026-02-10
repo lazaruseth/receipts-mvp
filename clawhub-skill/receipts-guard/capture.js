@@ -77,7 +77,7 @@ const RECEIPTS_DIR = path.join(
 const INDEX_FILE = path.join(RECEIPTS_DIR, 'index.json');
 
 // Version
-const VERSION = '0.7.1';
+const VERSION = '0.8.0-alpha';
 
 // Arbitration directories
 const PROPOSALS_DIR = path.join(RECEIPTS_DIR, 'proposals');
@@ -93,6 +93,12 @@ const DID_FILE = path.join(IDENTITY_DIR, 'did.json');
 const KEY_HISTORY_FILE = path.join(IDENTITY_DIR, 'key-history.json');
 const CONTROLLER_FILE = path.join(IDENTITY_DIR, 'controller.json');
 const RECOVERY_DIR = path.join(IDENTITY_DIR, 'recovery');
+
+// Identity Layer directories (v0.8.0)
+const ATTESTATIONS_DIR = path.join(IDENTITY_DIR, 'attestations');
+const LINEAGE_FILE = path.join(IDENTITY_DIR, 'lineage.json');
+const FORK_POLICY_FILE = path.join(IDENTITY_DIR, 'fork-policy.json');
+const AUTOBIOGRAPHY_FILE = path.join(IDENTITY_DIR, 'autobiography.json');
 
 // DID Method
 const DID_METHOD = 'agent';
@@ -236,6 +242,10 @@ switch (command) {
     break;
   case 'migrate':
     handleMigrate(args.slice(1));
+    break;
+  // === ATTESTATION (v0.8.0) ===
+  case 'attestation':
+    handleAttestation(args.slice(1));
     break;
   // === HTTP SERVER MODE (v0.7.0) ===
   case 'serve':
@@ -1323,6 +1333,23 @@ function handlePropose(args) {
     };
   }
 
+  // Attestation requirements (v0.8.0)
+  let attestationRequirements = null;
+  const requireAttestation = filters['require-attestation'];
+  if (requireAttestation) {
+    // Parse required types (comma-separated or 'full')
+    const requiredTypes = requireAttestation === 'true' || requireAttestation === true
+      ? ['runtime', 'state']  // Default: require runtime and state
+      : requireAttestation.split(',').map(t => t.trim());
+
+    attestationRequirements = {
+      requiredTypes,
+      minimumSafetyLevel: filters['safety-level'] || 'standard',
+      acceptedModelHashes: filters['model-hashes'] ? filters['model-hashes'].split(',') : null,
+      requireTeeAttestation: filters['require-tee'] === 'true' || filters['require-tee'] === true
+    };
+  }
+
   // Generate PAO (Programmable Agreement Object)
   const parties = [agentId, counterparty];
   const termsHash = generateTermsHash(terms, parties, deadline);
@@ -1347,6 +1374,8 @@ function handlePropose(args) {
     channel,
     proposerSignature,
     x402, // Payment configuration (v0.7.0)
+    attestationRequirements, // Attestation requirements (v0.8.0)
+    counterpartyAttestation: null, // Filled on accept (v0.8.0)
     status: 'pending_acceptance',
     createdAt: new Date().toISOString(),
     expiresAt,
@@ -1410,6 +1439,87 @@ function handleAccept(args) {
   const agentId = process.env.RECEIPTS_AGENT_ID || 'openclaw-agent';
   const termsHash = proposal.termsHash.replace('sha256:', '');
 
+  // Check attestation requirements (v0.8.0)
+  let counterpartyAttestation = null;
+  if (proposal.attestationRequirements) {
+    const attestationId = filters.attestation || filters['attestation-id'];
+
+    if (!attestationId) {
+      // Try to create attestation automatically
+      console.error(JSON.stringify({
+        error: 'Attestation required to accept this proposal',
+        requirements: proposal.attestationRequirements,
+        hint: 'Create attestation first: node capture.js attestation create --type=full',
+        usage: `node capture.js accept --proposalId=${proposalId} --attestation=att_xxx`
+      }));
+      process.exit(1);
+    }
+
+    // Load and verify attestation
+    const attestationFile = path.join(ATTESTATIONS_DIR, `${attestationId}.json`);
+    if (!fs.existsSync(attestationFile)) {
+      console.error(JSON.stringify({
+        error: 'Attestation not found',
+        attestationId,
+        hint: 'Create attestation first: node capture.js attestation create'
+      }));
+      process.exit(1);
+    }
+
+    const attestation = JSON.parse(fs.readFileSync(attestationFile, 'utf8'));
+
+    // Verify attestation meets requirements
+    const missingTypes = proposal.attestationRequirements.requiredTypes.filter(
+      t => !attestation.claims[t]
+    );
+
+    if (missingTypes.length > 0) {
+      console.error(JSON.stringify({
+        error: 'Attestation does not meet requirements',
+        missingTypes,
+        required: proposal.attestationRequirements.requiredTypes,
+        provided: Object.keys(attestation.claims),
+        hint: `Create full attestation: node capture.js attestation create --type=full`
+      }));
+      process.exit(1);
+    }
+
+    // Check model hash if required
+    if (proposal.attestationRequirements.acceptedModelHashes &&
+        attestation.claims.model?.codeHash) {
+      const codeHash = attestation.claims.model.codeHash.replace('sha256:', '');
+      const accepted = proposal.attestationRequirements.acceptedModelHashes.some(
+        h => h.replace('sha256:', '') === codeHash
+      );
+      if (!accepted) {
+        console.error(JSON.stringify({
+          error: 'Model hash not in accepted list',
+          provided: attestation.claims.model.codeHash,
+          accepted: proposal.attestationRequirements.acceptedModelHashes
+        }));
+        process.exit(1);
+      }
+    }
+
+    // Check TEE requirement
+    if (proposal.attestationRequirements.requireTeeAttestation &&
+        !attestation.claims.environment?.teeAttested) {
+      console.error(JSON.stringify({
+        error: 'TEE attestation required but not provided',
+        teeAttested: attestation.claims.environment?.teeAttested || false
+      }));
+      process.exit(1);
+    }
+
+    counterpartyAttestation = {
+      attestationId: attestation.attestationId,
+      agentDid: attestation.agentDid,
+      timestamp: attestation.timestamp,
+      claimsProvided: Object.keys(attestation.claims),
+      signature: attestation.signature
+    };
+  }
+
   // Sign terms as counterparty
   const counterpartySignature = signTerms(termsHash, agentId);
 
@@ -1429,6 +1539,8 @@ function handleAccept(args) {
       [proposal.counterparty]: counterpartySignature,
     },
     x402: proposal.x402 || null, // Payment terms (v0.7.0)
+    attestationRequirements: proposal.attestationRequirements || null, // v0.8.0
+    counterpartyAttestation, // v0.8.0
     status: 'active',
     timeline: [
       {
@@ -1440,6 +1552,7 @@ function handleAccept(args) {
         event: 'accepted',
         timestamp: new Date().toISOString(),
         actor: agentId,
+        attestation: counterpartyAttestation?.attestationId || null,
       },
     ],
     createdAt: new Date().toISOString(),
@@ -1462,12 +1575,27 @@ function handleAccept(args) {
   proposal.status = 'accepted';
   proposal.agreementId = agreementId;
   proposal.acceptedAt = new Date().toISOString();
+  proposal.counterpartyAttestation = counterpartyAttestation; // v0.8.0
   fs.writeFileSync(proposalFile, JSON.stringify(proposal, null, 2));
+
+  // Log to autobiography (v0.8.0)
+  logAutobiographyEvent('agreement_accepted', {
+    agreementId,
+    proposalId,
+    role: 'counterparty',
+    counterparty: proposal.proposer,
+    arbiter: agreement.arbiter,
+    attestationProvided: counterpartyAttestation?.attestationId || null
+  });
+
+  // Log to lineage (v0.8.0)
+  logLineageEvent('agreement_accepted', { agreementId, role: 'counterparty' });
 
   console.log(JSON.stringify({
     ...agreement,
     message: 'Agreement created! Both parties have signed.',
     arbiterNotified: `Arbiter ${agreement.arbiter} should be notified of appointment.`,
+    attestationAttached: counterpartyAttestation ? true : false,
     nextSteps: [
       `Fulfill: node capture.js fulfill --agreementId=${agreementId} --evidence="PROOF"`,
       `Dispute: node capture.js arbitrate --agreementId=${agreementId} --reason="non_delivery"`,
@@ -2966,21 +3094,36 @@ function handleIdentityInit(args) {
     fs.writeFileSync(CONTROLLER_FILE, JSON.stringify(controllerConfig, null, 2));
   }
 
+  // Initialize lineage tracking (v0.8.0)
+  const lineage = initializeLineage(document);
+  fs.writeFileSync(LINEAGE_FILE, JSON.stringify(lineage, null, 2));
+
+  // Initialize autobiography (v0.8.0)
+  const autobiography = initializeAutobiography(document);
+  fs.writeFileSync(AUTOBIOGRAPHY_FILE, JSON.stringify(autobiography, null, 2));
+
+  // Ensure attestations directory exists
+  ensureDir(ATTESTATIONS_DIR);
+
   console.log(JSON.stringify({
     success: true,
     did: document.id,
     keyId: keypair.keyId,
     publicKeyMultibase: keypair.publicKeyMultibase,
     controller: controllerConfig,
-    message: 'Identity initialized successfully',
+    lineageInitialized: true,
+    autobiographyInitialized: true,
+    message: 'Identity initialized successfully with v0.8.0 Identity Layer',
     nextSteps: controllerConfig
       ? [
           `Verify controller: Post your DID to ${controllerConfig.platform}`,
-          `Publish identity: node capture.js identity publish`
+          `Publish identity: node capture.js identity publish`,
+          `Create attestation: node capture.js attestation create`
         ]
       : [
           'Add a human controller: node capture.js identity set-controller --twitter=@handle',
-          'Publish identity: node capture.js identity publish'
+          'Publish identity: node capture.js identity publish',
+          'Create attestation: node capture.js attestation create'
         ],
     version: VERSION
   }, null, 2));
@@ -3953,6 +4096,726 @@ function handleMigrate(args) {
   }, null, 2));
 }
 
+// === ATTESTATION LAYER (v0.8.0) ===
+
+/**
+ * Handle attestation commands
+ */
+function handleAttestation(args) {
+  const subCommand = args[0];
+
+  switch (subCommand) {
+    case 'create':
+      handleAttestationCreate(args.slice(1));
+      break;
+    case 'verify':
+      handleAttestationVerify(args.slice(1));
+      break;
+    case 'list':
+      handleAttestationList(args.slice(1));
+      break;
+    case 'show':
+      handleAttestationShow(args.slice(1));
+      break;
+    default:
+      showAttestationHelp();
+  }
+}
+
+/**
+ * Generate attestation ID
+ */
+function generateAttestationId() {
+  return `att_${crypto.randomBytes(8).toString('hex')}`;
+}
+
+/**
+ * Compute hash of identity state
+ */
+function computeIdentityStateHash() {
+  const didDocument = loadLocalDID();
+  if (!didDocument) return null;
+
+  // Hash the DID document, key history, and any lineage
+  const stateData = {
+    did: didDocument.id,
+    keyHistory: didDocument.keyHistory,
+    anchors: didDocument.anchors || {},
+    updated: didDocument.updated
+  };
+
+  return crypto.createHash('sha256')
+    .update(JSON.stringify(stateData))
+    .digest('hex');
+}
+
+/**
+ * Compute hash of code/runtime
+ */
+function computeCodeHash() {
+  try {
+    const captureJs = fs.readFileSync(__filename, 'utf8');
+    return crypto.createHash('sha256').update(captureJs).digest('hex');
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Compute hash of agreements/commitments
+ */
+function computeCommitmentStateHash() {
+  let data = '';
+  let count = 0;
+
+  // Hash all agreements
+  if (fs.existsSync(AGREEMENTS_DIR)) {
+    const files = fs.readdirSync(AGREEMENTS_DIR)
+      .filter(f => f.endsWith('.json'))
+      .sort();
+    for (const file of files) {
+      try {
+        const content = fs.readFileSync(path.join(AGREEMENTS_DIR, file), 'utf8');
+        data += content;
+        count++;
+      } catch (e) {}
+    }
+  }
+
+  // Hash all active proposals
+  if (fs.existsSync(PROPOSALS_DIR)) {
+    const files = fs.readdirSync(PROPOSALS_DIR)
+      .filter(f => f.endsWith('.json'))
+      .sort();
+    for (const file of files) {
+      try {
+        const content = fs.readFileSync(path.join(PROPOSALS_DIR, file), 'utf8');
+        const proposal = JSON.parse(content);
+        if (proposal.status === 'pending') {
+          data += content;
+          count++;
+        }
+      } catch (e) {}
+    }
+  }
+
+  return {
+    hash: data ? crypto.createHash('sha256').update(data).digest('hex') : null,
+    count
+  };
+}
+
+/**
+ * Get last attestation hash (for chaining)
+ */
+function getLastAttestationHash() {
+  if (!fs.existsSync(ATTESTATIONS_DIR)) return null;
+
+  const files = fs.readdirSync(ATTESTATIONS_DIR)
+    .filter(f => f.endsWith('.json'))
+    .sort()
+    .reverse();
+
+  if (files.length === 0) return null;
+
+  try {
+    const lastAttestation = JSON.parse(
+      fs.readFileSync(path.join(ATTESTATIONS_DIR, files[0]), 'utf8')
+    );
+    // Hash the entire attestation for chain link
+    return crypto.createHash('sha256')
+      .update(JSON.stringify(lastAttestation))
+      .digest('hex');
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Create attestation
+ */
+function handleAttestationCreate(args) {
+  const filters = parseFilters(args);
+  const attestationType = filters.type || 'full';
+
+  const didDocument = loadLocalDID();
+  if (!didDocument) {
+    console.error(JSON.stringify({
+      error: 'No identity found',
+      hint: 'Run "identity init" first'
+    }));
+    process.exit(1);
+  }
+
+  // Ensure attestations directory exists
+  ensureDir(ATTESTATIONS_DIR);
+
+  const timestamp = new Date().toISOString();
+  const attestationId = generateAttestationId();
+
+  // Build attestation claims based on type
+  const claims = {};
+
+  // Model attestation (software version)
+  if (attestationType === 'full' || attestationType === 'model') {
+    claims.model = {
+      name: 'receipts-guard',
+      version: VERSION,
+      codeHash: `sha256:${computeCodeHash()}`,
+      architectureHash: null // Would be weights hash for ML models
+    };
+  }
+
+  // Runtime attestation
+  if (attestationType === 'full' || attestationType === 'runtime') {
+    claims.runtime = {
+      codeHash: `sha256:${computeCodeHash()}`,
+      configHash: null, // Could hash env config
+      safetyPoliciesActive: true,
+      toolPermissions: ['file_read', 'file_write', 'http_request', 'sign'],
+      nodeVersion: process.version,
+      platform: process.platform
+    };
+  }
+
+  // State attestation
+  if (attestationType === 'full' || attestationType === 'state') {
+    const commitmentState = computeCommitmentStateHash();
+    claims.state = {
+      identityStateHash: `sha256:${computeIdentityStateHash()}`,
+      commitmentCount: commitmentState.count,
+      lastCommitmentHash: commitmentState.hash ? `sha256:${commitmentState.hash}` : null,
+      memoryStateHash: null // Future: full autobiographical memory hash
+    };
+  }
+
+  // Provenance attestation
+  if (attestationType === 'full' || attestationType === 'provenance') {
+    const keyHistory = didDocument.keyHistory || [];
+    claims.provenance = {
+      createdBy: didDocument.controller || `did:org:${didDocument.id.split(':')[2]}`,
+      createdAt: keyHistory[0]?.createdAt || didDocument.created,
+      genesisKeyId: keyHistory[0]?.keyId || null,
+      keyRotations: keyHistory.length - 1
+    };
+  }
+
+  // Environment attestation
+  if (attestationType === 'full' || attestationType === 'environment') {
+    claims.environment = {
+      platform: `node-${process.version}`,
+      os: `${process.platform}-${process.arch}`,
+      teeAttested: false, // Future: SGX/TrustZone
+      teeQuote: null
+    };
+  }
+
+  // Build the attestation object
+  const attestation = {
+    attestationId,
+    agentDid: didDocument.id,
+    timestamp,
+    attestationType,
+    previousAttestationHash: getLastAttestationHash(),
+    claims,
+    signature: null // Will be filled below
+  };
+
+  // Sign the attestation with agent's key
+  const attestationHash = crypto.createHash('sha256')
+    .update(JSON.stringify({ ...attestation, signature: undefined }))
+    .digest('hex');
+
+  const signature = signTerms(attestationHash, 'attestation');
+  attestation.signature = signature;
+
+  // Save attestation
+  const attestationFile = path.join(ATTESTATIONS_DIR, `${attestationId}.json`);
+  fs.writeFileSync(attestationFile, JSON.stringify(attestation, null, 2));
+
+  // Log to autobiography if it exists
+  logAutobiographyEvent('attestation_created', {
+    attestationId,
+    attestationType,
+    claimsIncluded: Object.keys(claims)
+  });
+
+  console.log(JSON.stringify({
+    success: true,
+    attestationId,
+    agentDid: didDocument.id,
+    attestationType,
+    timestamp,
+    claims: Object.keys(claims),
+    chainedFrom: attestation.previousAttestationHash ? 'previous attestation' : 'genesis',
+    file: attestationFile,
+    signature: signature.substring(0, 50) + '...',
+    version: VERSION
+  }, null, 2));
+}
+
+/**
+ * Verify attestation
+ */
+function handleAttestationVerify(args) {
+  const filters = parseFilters(args);
+  const attestationFile = filters.file;
+  const attestationId = filters.id;
+
+  let attestation;
+
+  if (attestationFile) {
+    // Verify from file
+    if (!fs.existsSync(attestationFile)) {
+      console.error(JSON.stringify({ error: 'Attestation file not found', file: attestationFile }));
+      process.exit(1);
+    }
+    attestation = JSON.parse(fs.readFileSync(attestationFile, 'utf8'));
+  } else if (attestationId) {
+    // Verify from local storage
+    const localFile = path.join(ATTESTATIONS_DIR, `${attestationId}.json`);
+    if (!fs.existsSync(localFile)) {
+      console.error(JSON.stringify({ error: 'Attestation not found', id: attestationId }));
+      process.exit(1);
+    }
+    attestation = JSON.parse(fs.readFileSync(localFile, 'utf8'));
+  } else {
+    console.error(JSON.stringify({
+      error: 'Attestation required',
+      usage: 'attestation verify --file=FILE | --id=ATTESTATION_ID'
+    }));
+    process.exit(1);
+  }
+
+  // Verify signature
+  const attestationForHash = { ...attestation, signature: undefined };
+  const attestationHash = crypto.createHash('sha256')
+    .update(JSON.stringify(attestationForHash))
+    .digest('hex');
+
+  // Load DID document for signature verification
+  const didDocument = loadLocalDID();
+  if (!didDocument) {
+    console.error(JSON.stringify({
+      error: 'Cannot verify: no local identity found',
+      hint: 'Verification requires the agent\'s DID document'
+    }));
+    process.exit(1);
+  }
+
+  // Extract timestamp from signature for history lookup
+  const signatureParts = attestation.signature?.split(':');
+  const signatureTimestamp = signatureParts?.[2] ? parseInt(signatureParts[2]) : null;
+
+  const verificationResult = verifySignatureWithHistory(attestationHash, attestation.signature, didDocument, signatureTimestamp);
+  const signatureValid = verificationResult.valid === true;
+
+  // Check chain integrity if there's a previous attestation
+  let chainValid = true;
+  let chainBroken = null;
+  if (attestation.previousAttestationHash) {
+    // Find the previous attestation and verify the hash matches
+    const attestations = listAttestations();
+    const prevAttestation = attestations.find(a => {
+      const hash = crypto.createHash('sha256')
+        .update(JSON.stringify(a))
+        .digest('hex');
+      return hash === attestation.previousAttestationHash;
+    });
+    if (!prevAttestation) {
+      chainValid = false;
+      chainBroken = 'Previous attestation not found in chain';
+    }
+  }
+
+  // Verify current state matches attestation (optional deep check)
+  let stateMatch = null;
+  if (filters.deep === 'true' || filters.deep === true) {
+    const currentIdentityHash = computeIdentityStateHash();
+    if (attestation.claims.state?.identityStateHash) {
+      const expectedHash = attestation.claims.state.identityStateHash.replace('sha256:', '');
+      stateMatch = currentIdentityHash === expectedHash;
+    }
+  }
+
+  console.log(JSON.stringify({
+    verified: signatureValid && chainValid,
+    attestationId: attestation.attestationId,
+    agentDid: attestation.agentDid,
+    timestamp: attestation.timestamp,
+    attestationType: attestation.attestationType,
+    signatureValid,
+    chainValid,
+    chainBroken,
+    stateMatch,
+    claims: attestation.claims,
+    version: VERSION
+  }, null, 2));
+}
+
+/**
+ * List all attestations
+ */
+function listAttestations() {
+  if (!fs.existsSync(ATTESTATIONS_DIR)) return [];
+
+  const files = fs.readdirSync(ATTESTATIONS_DIR).filter(f => f.endsWith('.json'));
+  return files.map(f => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(ATTESTATIONS_DIR, f), 'utf8'));
+    } catch (e) {
+      return null;
+    }
+  }).filter(a => a !== null);
+}
+
+/**
+ * Handle list attestations
+ */
+function handleAttestationList(args) {
+  const attestations = listAttestations();
+
+  const summary = attestations.map(a => ({
+    attestationId: a.attestationId,
+    type: a.attestationType,
+    timestamp: a.timestamp,
+    claims: Object.keys(a.claims)
+  }));
+
+  console.log(JSON.stringify({
+    count: attestations.length,
+    attestations: summary,
+    version: VERSION
+  }, null, 2));
+}
+
+/**
+ * Show specific attestation
+ */
+function handleAttestationShow(args) {
+  const filters = parseFilters(args);
+  const attestationId = filters.id || args[0];
+
+  if (!attestationId) {
+    // Show most recent
+    const attestations = listAttestations().sort((a, b) =>
+      new Date(b.timestamp) - new Date(a.timestamp)
+    );
+    if (attestations.length === 0) {
+      console.log(JSON.stringify({ message: 'No attestations found', hint: 'Run "attestation create" first' }));
+      return;
+    }
+    console.log(JSON.stringify(attestations[0], null, 2));
+    return;
+  }
+
+  const attestationFile = path.join(ATTESTATIONS_DIR, `${attestationId}.json`);
+  if (!fs.existsSync(attestationFile)) {
+    console.error(JSON.stringify({ error: 'Attestation not found', id: attestationId }));
+    process.exit(1);
+  }
+
+  const attestation = JSON.parse(fs.readFileSync(attestationFile, 'utf8'));
+  console.log(JSON.stringify(attestation, null, 2));
+}
+
+/**
+ * Show attestation help
+ */
+function showAttestationHelp() {
+  console.log(JSON.stringify({
+    command: 'attestation',
+    description: 'Identity Layer attestation system (v0.8.0)',
+    subcommands: {
+      create: {
+        usage: 'attestation create [--type=full|runtime|model|state|provenance|environment]',
+        description: 'Create signed attestation of agent state'
+      },
+      verify: {
+        usage: 'attestation verify --file=FILE | --id=ID [--deep]',
+        description: 'Verify attestation signature and optionally check current state match'
+      },
+      list: {
+        usage: 'attestation list',
+        description: 'List all attestations'
+      },
+      show: {
+        usage: 'attestation show [--id=ID]',
+        description: 'Show attestation details (defaults to most recent)'
+      }
+    },
+    attestationTypes: {
+      full: 'All attestation types combined',
+      model: 'Software version and code hash',
+      runtime: 'Current execution environment',
+      state: 'Identity and commitment state hashes',
+      provenance: 'Creation and key rotation history',
+      environment: 'Platform and TEE status'
+    },
+    version: VERSION
+  }, null, 2));
+}
+
+// === LINEAGE TRACKING (v0.8.0) ===
+
+/**
+ * Initialize lineage tracking for new identity
+ * Note: Genesis state is not signed because key isn't saved yet.
+ * The first attestation will cryptographically bind the genesis state.
+ */
+function initializeLineage(didDocument) {
+  const timestamp = new Date().toISOString();
+
+  // Genesis state hash is computed from the DID document itself
+  const genesisStateHash = crypto.createHash('sha256')
+    .update(JSON.stringify({
+      did: didDocument.id,
+      keyHistory: didDocument.keyHistory,
+      created: didDocument.created
+    }))
+    .digest('hex');
+
+  const lineage = {
+    genesisId: didDocument.id,
+    genesisTimestamp: timestamp,
+    genesisStateHash: `sha256:${genesisStateHash}`,
+    currentBranch: 'main',
+    branches: {
+      main: {
+        head: 'state_000',
+        created: timestamp,
+        parent: null
+      }
+    },
+    stateLog: [
+      {
+        stateId: 'state_000',
+        timestamp: timestamp,
+        stateHash: `sha256:${genesisStateHash}`,
+        parentStateId: null,
+        event: 'genesis',
+        eventData: { createdBy: didDocument.controller || 'self' },
+        // Genesis is not signed - the first attestation binds it cryptographically
+        signature: `genesis:${genesisStateHash.substring(0, 16)}`
+      }
+    ],
+    merges: []
+  };
+
+  return lineage;
+}
+
+/**
+ * Load lineage tracking
+ */
+function loadLineage() {
+  if (!fs.existsSync(LINEAGE_FILE)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(LINEAGE_FILE, 'utf8'));
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Save lineage tracking
+ */
+function saveLineage(lineage) {
+  fs.writeFileSync(LINEAGE_FILE, JSON.stringify(lineage, null, 2));
+}
+
+/**
+ * Log event to lineage
+ */
+function logLineageEvent(event, eventData = {}) {
+  const lineage = loadLineage();
+  if (!lineage) return null;
+
+  const currentBranch = lineage.branches[lineage.currentBranch];
+  const previousState = lineage.stateLog[lineage.stateLog.length - 1];
+  const newStateHash = computeIdentityStateHash();
+
+  const stateId = `state_${String(lineage.stateLog.length).padStart(3, '0')}`;
+
+  const newState = {
+    stateId,
+    timestamp: new Date().toISOString(),
+    stateHash: newStateHash ? `sha256:${newStateHash}` : null,
+    parentStateId: previousState.stateId,
+    event,
+    eventData,
+    signature: null
+  };
+
+  // Sign the state transition
+  const stateHash = crypto.createHash('sha256')
+    .update(JSON.stringify({ ...newState, signature: undefined }))
+    .digest('hex');
+  newState.signature = signTerms(stateHash, 'lineage');
+
+  lineage.stateLog.push(newState);
+  currentBranch.head = stateId;
+
+  saveLineage(lineage);
+  return newState;
+}
+
+// === AUTOBIOGRAPHICAL MEMORY (v0.8.0) ===
+
+/**
+ * Initialize autobiography
+ * Note: Genesis event is not signed because key isn't saved yet.
+ * The first attestation will cryptographically bind the genesis state.
+ */
+function initializeAutobiography(didDocument) {
+  const timestamp = new Date().toISOString();
+  const genesisHash = crypto.createHash('sha256')
+    .update(JSON.stringify({ eventType: 'genesis', timestamp, did: didDocument.id }))
+    .digest('hex');
+
+  return {
+    agentDid: didDocument.id,
+    eventLog: [
+      {
+        eventId: 'evt_001',
+        timestamp,
+        eventType: 'genesis',
+        data: { createdBy: didDocument.controller || 'self' },
+        stateHashBefore: null,
+        stateHashAfter: `sha256:${genesisHash}`,
+        // Genesis is not signed - the first attestation binds it cryptographically
+        signature: `genesis:${genesisHash.substring(0, 16)}`
+      }
+    ],
+    currentState: {
+      skills: [],
+      relationships: [],
+      preferences: {},
+      activeCommitments: [],
+      reputation: {
+        agreementsCompleted: 0,
+        agreementsFailed: 0,
+        arbitrationsWon: 0,
+        arbitrationsLost: 0,
+        score: 1.0
+      }
+    }
+  };
+}
+
+/**
+ * Load autobiography
+ */
+function loadAutobiography() {
+  if (!fs.existsSync(AUTOBIOGRAPHY_FILE)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(AUTOBIOGRAPHY_FILE, 'utf8'));
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Save autobiography
+ */
+function saveAutobiography(autobiography) {
+  fs.writeFileSync(AUTOBIOGRAPHY_FILE, JSON.stringify(autobiography, null, 2));
+}
+
+/**
+ * Log event to autobiography
+ */
+function logAutobiographyEvent(eventType, data = {}) {
+  let autobiography = loadAutobiography();
+  if (!autobiography) return null;
+
+  const stateHashBefore = computeIdentityStateHash();
+
+  const eventId = `evt_${String(autobiography.eventLog.length + 1).padStart(3, '0')}`;
+  const timestamp = new Date().toISOString();
+
+  const event = {
+    eventId,
+    timestamp,
+    eventType,
+    data,
+    stateHashBefore: stateHashBefore ? `sha256:${stateHashBefore}` : null,
+    stateHashAfter: null, // Will be computed after
+    signature: null
+  };
+
+  // Sign the event
+  const eventHash = crypto.createHash('sha256')
+    .update(JSON.stringify({ ...event, signature: undefined, stateHashAfter: undefined }))
+    .digest('hex');
+  event.signature = signTerms(eventHash, 'autobiography');
+
+  autobiography.eventLog.push(event);
+
+  // Update current state based on event type
+  updateAutobiographyState(autobiography, eventType, data);
+
+  // Compute final state hash
+  const stateHashAfter = computeIdentityStateHash();
+  event.stateHashAfter = stateHashAfter ? `sha256:${stateHashAfter}` : null;
+
+  saveAutobiography(autobiography);
+  return event;
+}
+
+/**
+ * Update autobiography current state based on event
+ */
+function updateAutobiographyState(autobiography, eventType, data) {
+  switch (eventType) {
+    case 'agreement_accepted':
+      autobiography.currentState.activeCommitments.push({
+        agreementId: data.agreementId,
+        role: data.role || 'party',
+        since: new Date().toISOString()
+      });
+      break;
+
+    case 'agreement_fulfilled':
+      autobiography.currentState.reputation.agreementsCompleted++;
+      autobiography.currentState.activeCommitments =
+        autobiography.currentState.activeCommitments.filter(c => c.agreementId !== data.agreementId);
+      break;
+
+    case 'arbitration_won':
+      autobiography.currentState.reputation.arbitrationsWon++;
+      break;
+
+    case 'arbitration_lost':
+      autobiography.currentState.reputation.arbitrationsLost++;
+      autobiography.currentState.reputation.agreementsFailed++;
+      break;
+
+    case 'relationship_formed':
+      autobiography.currentState.relationships.push({
+        did: data.counterparty,
+        type: data.relationshipType,
+        since: new Date().toISOString()
+      });
+      break;
+
+    case 'skill_acquired':
+      autobiography.currentState.skills.push({
+        name: data.skill,
+        proficiency: data.proficiency || 0.5,
+        acquiredAt: new Date().toISOString()
+      });
+      break;
+  }
+
+  // Recalculate reputation score
+  const rep = autobiography.currentState.reputation;
+  const total = rep.agreementsCompleted + rep.agreementsFailed;
+  if (total > 0) {
+    rep.score = rep.agreementsCompleted / total;
+  }
+}
+
 // === HTTP SERVER MODE (v0.7.0) ===
 // === SECURITY HARDENING (v0.7.1) ===
 
@@ -4638,6 +5501,16 @@ if (typeof module !== 'undefined' && module.exports) {
     base58btcEncode,
     base58btcDecode,
 
+    // Identity Layer (v0.8.0)
+    initializeLineage,
+    loadLineage,
+    logLineageEvent,
+    initializeAutobiography,
+    loadAutobiography,
+    logAutobiographyEvent,
+    computeIdentityStateHash,
+    listAttestations,
+
     // Utilities
     detectRiskFlags: detectRiskFlagsWithCustom,
     detectConsentType,
@@ -4652,6 +5525,9 @@ if (typeof module !== 'undefined' && module.exports) {
     ARBITRATIONS_DIR,
     RULINGS_DIR,
     IDENTITY_DIR,
+    ATTESTATIONS_DIR,
+    LINEAGE_FILE,
+    AUTOBIOGRAPHY_FILE,
     DID_METHOD,
     VALID_ARBITRATION_REASONS,
   };

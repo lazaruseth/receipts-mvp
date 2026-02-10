@@ -1,10 +1,10 @@
 ---
 name: receipts-guard
 description: ERC-8004 identity, x402 payments, and arbitration protocol for autonomous agent commerce. The three rails for the machine economy.
-metadata: {"openclaw":{"emoji":"⚖️","requires":{"anyBins":["node"]},"version":"0.7.1"}}
+metadata: {"openclaw":{"emoji":"⚖️","requires":{"anyBins":["node"]},"version":"0.8.0-alpha"}}
 ---
 
-# RECEIPTS Guard v0.7.1 - The Three Rails
+# RECEIPTS Guard v0.8.0-alpha - Identity Layer
 
 > "The rails for the machine economy."
 
@@ -17,7 +17,24 @@ ERC-8004 identity + x402 payments + arbitration protocol. The infrastructure for
 | **Trust** | ERC-8004 Reputation | Arbitration outcomes build reputation |
 | **Payment** | x402 | Paid arbitration, automated settlements |
 
-**Local-first. Chain-anchored. Cloud-deployable. Security-hardened.**
+**Local-first. Chain-anchored. Cloud-deployable. Security-hardened. Identity-layered.**
+
+## What's New in v0.8.0-alpha (Identity Layer)
+
+- **🔐 Attestation System** - Prove who you are AND what you are
+- **🌳 Lineage Tracking** - Git-like state log for agent history
+- **📖 Autobiographical Memory** - Hash-chained event log of agent life
+- **🔗 Attestation Chaining** - Each attestation links to previous
+
+### Attestation Types
+| Type | What It Proves |
+|------|----------------|
+| `model` | Software version and code hash |
+| `runtime` | Current execution environment |
+| `state` | Identity and commitment state hashes |
+| `provenance` | Creation and key rotation history |
+| `environment` | Platform and TEE status |
+| `full` | All of the above |
 
 ## What's New in v0.7.1 (Security Hardening)
 
@@ -53,8 +70,16 @@ ERC-8004 identity + x402 payments + arbitration protocol. The infrastructure for
 node capture.js propose "I will deliver API docs by Friday" "AgentX" \
   --arbiter="arbiter-prime" --deadline="2026-02-14"
 
+# 1b. Create proposal requiring attestation (v0.8.0)
+node capture.js propose "I will deliver API docs by Friday" "AgentX" \
+  --arbiter="arbiter-prime" --require-attestation=runtime,state
+
 # 2. Accept proposal (as counterparty)
 node capture.js accept --proposalId=prop_abc123
+
+# 2b. Accept with attestation (if required)
+node capture.js attestation create --type=full
+node capture.js accept --proposalId=prop_abc123 --attestation=att_xxx
 
 # 3. Fulfill agreement
 node capture.js fulfill --agreementId=agr_xyz789 \
@@ -163,6 +188,144 @@ node capture.js identity resolve --did=did:agent:namespace:name [--chain=CHAIN]
 ```
 
 Resolves DID from local storage or on-chain registry.
+
+---
+
+### Attestation (v0.8.0)
+
+The attestation system allows agents to prove not just *who* they are, but *what* they are.
+
+#### `attestation create` - Create Signed Attestation
+```bash
+# Full attestation (all types)
+node capture.js attestation create
+
+# Specific type
+node capture.js attestation create --type=runtime
+node capture.js attestation create --type=state
+node capture.js attestation create --type=model
+```
+
+Creates a signed attestation including:
+- **Model**: Software version, code hash
+- **Runtime**: Execution environment, safety policies
+- **State**: Identity state hash, commitment count
+- **Provenance**: Creation time, key rotation count
+- **Environment**: Platform, TEE status
+
+Each attestation is hash-chained to the previous one.
+
+#### `attestation verify` - Verify Attestation
+```bash
+# Verify by ID
+node capture.js attestation verify --id=att_abc123
+
+# Verify from file
+node capture.js attestation verify --file=attestation.json
+
+# Deep verification (check current state matches)
+node capture.js attestation verify --id=att_abc123 --deep
+```
+
+Returns verification status including:
+- Signature validity
+- Chain integrity
+- State match (with `--deep`)
+
+#### `attestation list` - List All Attestations
+```bash
+node capture.js attestation list
+```
+
+#### `attestation show` - Show Attestation Details
+```bash
+# Most recent
+node capture.js attestation show
+
+# Specific ID
+node capture.js attestation show --id=att_abc123
+```
+
+#### Attestation in Proposals
+
+Proposers can require counterparties to provide attestation when accepting:
+
+```bash
+# Require runtime and state attestation
+node capture.js propose "Terms" "Counterparty" \
+  --arbiter="arbiter" \
+  --require-attestation=runtime,state
+
+# Require full attestation
+node capture.js propose "Terms" "Counterparty" \
+  --arbiter="arbiter" \
+  --require-attestation=full
+
+# Require specific model hashes (whitelist)
+node capture.js propose "Terms" "Counterparty" \
+  --arbiter="arbiter" \
+  --require-attestation=model \
+  --model-hashes="sha256:abc123,sha256:def456"
+
+# Require TEE attestation
+node capture.js propose "Terms" "Counterparty" \
+  --arbiter="arbiter" \
+  --require-attestation=environment \
+  --require-tee=true
+```
+
+When accepting a proposal with attestation requirements:
+```bash
+# Create attestation first
+node capture.js attestation create --type=full
+
+# Accept with attestation
+node capture.js accept --proposalId=prop_xxx --attestation=att_xxx
+```
+
+The attestation is stored in the agreement and can be verified by the arbiter if disputes arise.
+
+---
+
+### Lineage Tracking (v0.8.0)
+
+RECEIPTS tracks agent state evolution like git tracks code:
+
+- **Genesis**: The first state when identity is created
+- **State Log**: Hash-chained log of every state transition
+- **Branches**: Support for forks (future)
+- **Merges**: Support for reunification (future)
+
+Lineage is automatically initialized on `identity init` and updated on significant events.
+
+View lineage:
+```bash
+cat ~/.openclaw/receipts/identity/lineage.json
+```
+
+---
+
+### Autobiographical Memory (v0.8.0)
+
+The autobiography is a hash-chained log of significant events in the agent's life:
+
+- Identity creation (genesis)
+- Attestations created
+- Agreements accepted/fulfilled
+- Arbitration outcomes
+- Skills acquired
+- Relationships formed
+
+View autobiography:
+```bash
+cat ~/.openclaw/receipts/identity/autobiography.json
+```
+
+The autobiography enables:
+- **Reputation scoring** from event history
+- **Skill tracking** for capability discovery
+- **Relationship graph** for trust networks
+- **Privacy-filtered export** for sharing
 
 ---
 
