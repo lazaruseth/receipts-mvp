@@ -1,10 +1,10 @@
 ---
 name: receipts-guard
 description: ERC-8004 identity, x402 payments, and arbitration protocol for autonomous agent commerce. The three rails for the machine economy.
-metadata: {"openclaw":{"emoji":"⚖️","requires":{"anyBins":["node"]},"version":"0.8.0-alpha"}}
+metadata: {"openclaw":{"emoji":"⚖️","requires":{"anyBins":["node"]},"version":"0.8.0-beta"}}
 ---
 
-# RECEIPTS Guard v0.8.0-alpha - Identity Layer
+# RECEIPTS Guard v0.8.0-beta - Fork Handling
 
 > "The rails for the machine economy."
 
@@ -17,7 +17,21 @@ ERC-8004 identity + x402 payments + arbitration protocol. The infrastructure for
 | **Trust** | ERC-8004 Reputation | Arbitration outcomes build reputation |
 | **Payment** | x402 | Paid arbitration, automated settlements |
 
-**Local-first. Chain-anchored. Cloud-deployable. Security-hardened. Identity-layered.**
+**Local-first. Chain-anchored. Cloud-deployable. Security-hardened. Identity-layered. Fork-aware.**
+
+## What's New in v0.8.0-beta (Fork Handling)
+
+- **🔀 Fork System** - Create descendant identities with linked lineage
+- **🔗 Merge Support** - Reunify forks back to main branch
+- **📋 Fork Policies** - Singleton, lineage, and delegate modes
+- **🌳 Lineage Tree** - Visualize your agent's family tree
+
+### Fork Policy Modes
+| Mode | Description |
+|------|-------------|
+| `singleton` | Only one live instance allowed (default) |
+| `lineage` | Forks create descendants with optional agreement inheritance |
+| `delegate` | Sub-agents with scoped authority |
 
 ## What's New in v0.8.0-alpha (Identity Layer)
 
@@ -293,15 +307,110 @@ RECEIPTS tracks agent state evolution like git tracks code:
 
 - **Genesis**: The first state when identity is created
 - **State Log**: Hash-chained log of every state transition
-- **Branches**: Support for forks (future)
-- **Merges**: Support for reunification (future)
+- **Branches**: Support for forks
+- **Merges**: Support for reunification
 
 Lineage is automatically initialized on `identity init` and updated on significant events.
 
-View lineage:
+#### `identity lineage` - View Lineage Details
 ```bash
-cat ~/.openclaw/receipts/identity/lineage.json
+# Show recent state transitions
+node capture.js identity lineage
+
+# Show specific state
+node capture.js identity lineage --state=state_003
+
+# Limit results
+node capture.js identity lineage --limit=5
 ```
+
+---
+
+### Fork Handling (v0.8.0-beta)
+
+When an agent state is copied, what happens to its identity, agreements, and reputation? Fork handling provides the answer.
+
+#### Fork Policy Modes
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| `singleton` | Only one live instance allowed | Default, most secure |
+| `lineage` | Forks create descendants | Parallel deployments |
+| `delegate` | Sub-agents with scoped authority | Task delegation |
+
+#### `identity fork-policy` - View/Modify Fork Policy
+```bash
+# View current policy
+node capture.js identity fork-policy
+
+# Switch to lineage mode (enables forking)
+node capture.js identity fork-policy --type=lineage --allow-forks
+
+# Configure fork inheritance
+node capture.js identity fork-policy \
+  --allow-forks \
+  --inherit-agreements=true \
+  --inherit-reputation=partial \
+  --max-forks=5
+```
+
+#### `identity fork` - Create Descendant Identity
+```bash
+# Create a fork
+node capture.js identity fork --name=deployment-west --reason=geo_redundancy
+
+# Output includes:
+# - New fork DID: did:agent:namespace:name:deployment-west
+# - Fork bundle path (for deploying elsewhere)
+# - Number of inherited agreements
+```
+
+The fork bundle contains:
+- New DID document with fresh keypair
+- Link to parent DID (signed by parent)
+- Inherited agreements (if policy allows)
+- Lineage branch reference
+
+#### `identity forks` - View Lineage Tree
+```bash
+# ASCII tree visualization
+node capture.js identity forks
+
+# Output:
+# did:agent:remaster_io:receipts-guard
+# └── main (head: state_004) ← current
+#     ├── deployment-west (did:agent:...:deployment-west)
+#     │   forked from main at state_002
+#     └── deployment-east (did:agent:...:deployment-east)
+#         forked from main at state_003
+
+# JSON output
+node capture.js identity forks --json
+```
+
+#### `identity merge` - Merge Fork Back
+```bash
+# Merge fork into main
+node capture.js identity merge --source=deployment-west
+
+# Merge and delete source branch
+node capture.js identity merge --source=deployment-west --delete-source
+
+# Merge into specific target
+node capture.js identity merge --source=deployment-west --target=main
+```
+
+#### Fork Inheritance Rules
+
+When a fork is created:
+
+| Policy Setting | Behavior |
+|----------------|----------|
+| `forkInheritsAgreements: false` | Fork starts fresh (default) |
+| `forkInheritsAgreements: true` | Fork gets copies of active agreements |
+| `forkInheritsReputation: none` | Fork starts with 0 reputation |
+| `forkInheritsReputation: partial` | Fork gets 50% of parent reputation |
+| `forkInheritsReputation: full` | Fork inherits full reputation |
 
 ---
 

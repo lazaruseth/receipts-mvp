@@ -77,7 +77,7 @@ const RECEIPTS_DIR = path.join(
 const INDEX_FILE = path.join(RECEIPTS_DIR, 'index.json');
 
 // Version
-const VERSION = '0.8.0-alpha';
+const VERSION = '0.8.0-beta';
 
 // Arbitration directories
 const PROPOSALS_DIR = path.join(RECEIPTS_DIR, 'proposals');
@@ -3007,6 +3007,22 @@ function handleIdentity(args) {
     case 'anchor':
       handleIdentityAnchor(args.slice(1));
       break;
+    // === FORK HANDLING (v0.8.0-beta) ===
+    case 'fork':
+      handleIdentityFork(args.slice(1));
+      break;
+    case 'forks':
+      handleIdentityForks(args.slice(1));
+      break;
+    case 'merge':
+      handleIdentityMerge(args.slice(1));
+      break;
+    case 'fork-policy':
+      handleIdentityForkPolicy(args.slice(1));
+      break;
+    case 'lineage':
+      handleIdentityLineage(args.slice(1));
+      break;
     default:
       showIdentityHelp();
   }
@@ -3102,6 +3118,10 @@ function handleIdentityInit(args) {
   const autobiography = initializeAutobiography(document);
   fs.writeFileSync(AUTOBIOGRAPHY_FILE, JSON.stringify(autobiography, null, 2));
 
+  // Initialize fork policy (v0.8.0-beta)
+  const forkPolicy = initializeForkPolicy();
+  fs.writeFileSync(FORK_POLICY_FILE, JSON.stringify(forkPolicy, null, 2));
+
   // Ensure attestations directory exists
   ensureDir(ATTESTATIONS_DIR);
 
@@ -3113,6 +3133,7 @@ function handleIdentityInit(args) {
     controller: controllerConfig,
     lineageInitialized: true,
     autobiographyInitialized: true,
+    forkPolicyInitialized: true,
     message: 'Identity initialized successfully with v0.8.0 Identity Layer',
     nextSteps: controllerConfig
       ? [
@@ -4814,6 +4835,607 @@ function updateAutobiographyState(autobiography, eventType, data) {
   if (total > 0) {
     rep.score = rep.agreementsCompleted / total;
   }
+}
+
+// === FORK HANDLING (v0.8.0-beta) ===
+
+/**
+ * Initialize default fork policy
+ * Three modes:
+ * - singleton: Only one live instance allowed (default)
+ * - lineage: Forks create descendants with optional agreement inheritance
+ * - delegate: Sub-agents with scoped authority
+ */
+function initializeForkPolicy() {
+  return {
+    policyType: 'singleton',
+    version: '0.8.0-beta',
+    createdAt: new Date().toISOString(),
+
+    singleton: {
+      enforced: true,
+      leaseRequired: false,
+      leaseDuration: 3600000,       // 1 hour
+      leaseRenewalWindow: 300000,   // 5 min before expiry
+      currentLease: null
+    },
+
+    lineage: {
+      allowForks: false,
+      forkInheritsAgreements: false,
+      forkInheritsReputation: 'none',  // 'none', 'partial', 'full'
+      forkRequiresParentSignature: true,
+      mergeAllowed: true,
+      maxForks: 10
+    },
+
+    delegate: {
+      maxDelegates: 5,
+      delegatePermissions: ['read', 'propose'],  // Not 'accept', 'sign'
+      delegateExpiry: 86400000,  // 24 hours
+      delegateRevocable: true,
+      activeDelegates: []
+    }
+  };
+}
+
+/**
+ * Load fork policy
+ */
+function loadForkPolicy() {
+  if (!fs.existsSync(FORK_POLICY_FILE)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(FORK_POLICY_FILE, 'utf8'));
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Save fork policy
+ */
+function saveForkPolicy(policy) {
+  fs.writeFileSync(FORK_POLICY_FILE, JSON.stringify(policy, null, 2));
+}
+
+/**
+ * Handle identity fork command
+ * Creates a descendant identity with new keys but linked lineage
+ */
+function handleIdentityFork(args) {
+  const filters = parseFilters(args);
+
+  const forkPolicy = loadForkPolicy();
+  if (!forkPolicy) {
+    console.error(JSON.stringify({
+      error: 'No fork policy found',
+      hint: 'Initialize identity first: node capture.js identity init'
+    }));
+    process.exit(1);
+  }
+
+  // Check if forking is allowed
+  if (forkPolicy.policyType === 'singleton' && forkPolicy.singleton.enforced) {
+    console.error(JSON.stringify({
+      error: 'Fork not allowed: singleton policy enforced',
+      hint: 'Change fork policy to lineage mode: node capture.js identity fork-policy --type=lineage'
+    }));
+    process.exit(1);
+  }
+
+  if (forkPolicy.policyType === 'lineage' && !forkPolicy.lineage.allowForks) {
+    console.error(JSON.stringify({
+      error: 'Fork not allowed: lineage.allowForks is false',
+      hint: 'Enable forking: node capture.js identity fork-policy --allow-forks'
+    }));
+    process.exit(1);
+  }
+
+  const parentDID = loadLocalDID();
+  if (!parentDID) {
+    console.error(JSON.stringify({ error: 'No identity found' }));
+    process.exit(1);
+  }
+
+  const lineage = loadLineage();
+  if (!lineage) {
+    console.error(JSON.stringify({ error: 'No lineage found' }));
+    process.exit(1);
+  }
+
+  // Check max forks
+  const currentForks = Object.keys(lineage.branches).filter(b => b !== 'main').length;
+  if (currentForks >= (forkPolicy.lineage.maxForks || 10)) {
+    console.error(JSON.stringify({
+      error: `Max forks reached: ${currentForks}/${forkPolicy.lineage.maxForks}`,
+      hint: 'Merge existing forks before creating new ones'
+    }));
+    process.exit(1);
+  }
+
+  const forkName = filters.name || `fork-${new Date().toISOString().split('T')[0]}`;
+  const forkReason = filters.reason || 'manual_fork';
+
+  // Generate fork DID (same namespace, different identifier)
+  const parentParts = parentDID.id.split(':');
+  const namespace = parentParts[2];
+  const parentIdentifier = parentParts[3];
+  const forkIdentifier = `${parentIdentifier}:${forkName}`;
+
+  // Fork gets new keypair but linked to parent lineage
+  const nacl = require('tweetnacl');
+  const keypair = nacl.sign.keyPair();
+  const publicKeyBase58 = base58btcEncode(Buffer.from([0xed, 0x01, ...keypair.publicKey]));
+
+  const forkDID = `did:${DID_METHOD}:${namespace}:${forkIdentifier}`;
+  const timestamp = new Date().toISOString();
+
+  // Create fork branch in lineage
+  const currentHead = lineage.branches[lineage.currentBranch].head;
+  const forkBranchName = forkName.replace(/[^a-zA-Z0-9-]/g, '-');
+  const forkStateId = `state_${String(lineage.stateLog.length).padStart(3, '0')}`;
+
+  const forkStateHash = crypto.createHash('sha256')
+    .update(JSON.stringify({ forkDID, parentDID: parentDID.id, timestamp }))
+    .digest('hex');
+
+  // Sign the fork with parent's key (proves parent authorized it)
+  const forkSignature = signTerms(forkStateHash, 'fork');
+
+  // Add fork branch
+  lineage.branches[forkBranchName] = {
+    head: forkStateId,
+    created: timestamp,
+    parent: currentHead,
+    forkedFrom: lineage.currentBranch,
+    forkDID: forkDID,
+    forkReason: forkReason
+  };
+
+  // Add fork event to state log
+  lineage.stateLog.push({
+    stateId: forkStateId,
+    timestamp: timestamp,
+    stateHash: `sha256:${forkStateHash}`,
+    parentStateId: currentHead,
+    event: 'fork_created',
+    eventData: {
+      forkName: forkName,
+      forkDID: forkDID,
+      forkReason: forkReason,
+      forkBranch: forkBranchName
+    },
+    signature: forkSignature
+  });
+
+  saveLineage(lineage);
+
+  // Log to autobiography
+  logAutobiographyEvent('fork_created', {
+    forkDID: forkDID,
+    forkName: forkName,
+    forkReason: forkReason,
+    forkBranch: forkBranchName
+  });
+
+  // Create fork DID document (for export)
+  const forkDocument = {
+    '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/suites/ed25519-2020/v1'],
+    id: forkDID,
+    created: timestamp,
+    parent: parentDID.id,
+    forkedAt: timestamp,
+    forkedFrom: {
+      did: parentDID.id,
+      stateId: currentHead,
+      signature: forkSignature
+    },
+    verificationMethod: [{
+      id: `${forkDID}#key-1`,
+      type: 'Ed25519VerificationKey2020',
+      controller: forkDID,
+      publicKeyMultibase: `z${publicKeyBase58}`
+    }],
+    keyHistory: [{
+      keyId: `${forkDID}#key-1`,
+      publicKeyMultibase: `z${publicKeyBase58}`,
+      validFrom: timestamp,
+      validUntil: null,
+      previousKey: null
+    }]
+  };
+
+  // Export fork bundle
+  const forkBundleDir = path.join(IDENTITY_DIR, 'forks');
+  ensureDir(forkBundleDir);
+
+  const forkBundle = {
+    forkId: `fork_${crypto.randomBytes(4).toString('hex')}`,
+    forkDID: forkDID,
+    parentDID: parentDID.id,
+    forkName: forkName,
+    forkReason: forkReason,
+    createdAt: timestamp,
+    didDocument: forkDocument,
+    privateKey: Buffer.from(keypair.secretKey).toString('base64'),
+    lineageBranch: forkBranchName,
+    inheritedAgreements: forkPolicy.lineage.forkInheritsAgreements ? getActiveAgreements() : [],
+    signature: forkSignature
+  };
+
+  const bundlePath = path.join(forkBundleDir, `${forkBranchName}.json`);
+  fs.writeFileSync(bundlePath, JSON.stringify(forkBundle, null, 2));
+
+  console.log(JSON.stringify({
+    success: true,
+    forkDID: forkDID,
+    parentDID: parentDID.id,
+    forkName: forkName,
+    forkBranch: forkBranchName,
+    forkReason: forkReason,
+    bundlePath: bundlePath,
+    inheritedAgreements: forkBundle.inheritedAgreements.length,
+    message: 'Fork created successfully',
+    nextSteps: [
+      `To activate fork on another machine: copy ${bundlePath}`,
+      `To merge fork back: node capture.js identity merge --source=${forkBranchName}`,
+      `To view all forks: node capture.js identity forks`
+    ]
+  }, null, 2));
+}
+
+/**
+ * Get active agreements for fork inheritance
+ */
+function getActiveAgreements() {
+  ensureDir(AGREEMENTS_DIR);
+  const files = fs.readdirSync(AGREEMENTS_DIR).filter(f => f.endsWith('.json'));
+  return files.map(f => {
+    const agreement = JSON.parse(fs.readFileSync(path.join(AGREEMENTS_DIR, f), 'utf8'));
+    if (agreement.status === 'active') {
+      return {
+        agreementId: agreement.agreementId,
+        terms: agreement.terms?.substring(0, 100) + '...',
+        counterparty: agreement.counterparty
+      };
+    }
+    return null;
+  }).filter(Boolean);
+}
+
+/**
+ * Handle identity forks command - list all forks
+ */
+function handleIdentityForks(args) {
+  const filters = parseFilters(args);
+
+  const lineage = loadLineage();
+  if (!lineage) {
+    console.error(JSON.stringify({
+      error: 'No lineage found',
+      hint: 'Initialize identity first'
+    }));
+    process.exit(1);
+  }
+
+  const didDocument = loadLocalDID();
+
+  // Build tree structure
+  const branches = Object.entries(lineage.branches).map(([name, branch]) => ({
+    name,
+    ...branch,
+    isCurrent: name === lineage.currentBranch,
+    stateCount: lineage.stateLog.filter(s =>
+      s.eventData?.forkBranch === name || (name === 'main' && !s.eventData?.forkBranch)
+    ).length
+  }));
+
+  // ASCII tree visualization
+  let tree = '';
+  const mainBranch = branches.find(b => b.name === 'main');
+  const forkBranches = branches.filter(b => b.name !== 'main');
+
+  tree += `${lineage.genesisId}\n`;
+  tree += `└── main (head: ${mainBranch.head})${mainBranch.isCurrent ? ' ← current' : ''}\n`;
+
+  forkBranches.forEach((fork, i) => {
+    const isLast = i === forkBranches.length - 1;
+    const prefix = isLast ? '    └── ' : '    ├── ';
+    tree += `${prefix}${fork.name} (${fork.forkDID || 'local'})${fork.isCurrent ? ' ← current' : ''}\n`;
+    if (fork.forkedFrom) {
+      tree += `${isLast ? '        ' : '    │   '}forked from ${fork.forkedFrom} at ${fork.parent}\n`;
+    }
+  });
+
+  if (filters.json === 'true' || filters.json === true) {
+    console.log(JSON.stringify({
+      genesisId: lineage.genesisId,
+      genesisTimestamp: lineage.genesisTimestamp,
+      currentBranch: lineage.currentBranch,
+      branches: branches,
+      mergeHistory: lineage.merges
+    }, null, 2));
+  } else {
+    console.log('\n=== LINEAGE TREE ===\n');
+    console.log(tree);
+    console.log(`\nGenesis: ${lineage.genesisTimestamp}`);
+    console.log(`Total branches: ${branches.length}`);
+    console.log(`Total state transitions: ${lineage.stateLog.length}`);
+    console.log(`Merges: ${lineage.merges.length}`);
+    console.log('\nUse --json for machine-readable output');
+  }
+}
+
+/**
+ * Handle identity merge command - merge fork back to main
+ */
+function handleIdentityMerge(args) {
+  const filters = parseFilters(args);
+
+  const sourceBranch = filters.source;
+  if (!sourceBranch) {
+    console.error(JSON.stringify({
+      error: 'Missing required: --source=BRANCH_NAME',
+      hint: 'View available branches: node capture.js identity forks'
+    }));
+    process.exit(1);
+  }
+
+  const lineage = loadLineage();
+  if (!lineage) {
+    console.error(JSON.stringify({ error: 'No lineage found' }));
+    process.exit(1);
+  }
+
+  const forkPolicy = loadForkPolicy();
+  if (!forkPolicy.lineage.mergeAllowed) {
+    console.error(JSON.stringify({
+      error: 'Merge not allowed by fork policy',
+      hint: 'Enable merging: node capture.js identity fork-policy --allow-merge'
+    }));
+    process.exit(1);
+  }
+
+  if (!lineage.branches[sourceBranch]) {
+    console.error(JSON.stringify({
+      error: `Branch not found: ${sourceBranch}`,
+      available: Object.keys(lineage.branches)
+    }));
+    process.exit(1);
+  }
+
+  if (sourceBranch === 'main') {
+    console.error(JSON.stringify({
+      error: 'Cannot merge main into itself'
+    }));
+    process.exit(1);
+  }
+
+  const targetBranch = filters.target || 'main';
+  if (!lineage.branches[targetBranch]) {
+    console.error(JSON.stringify({
+      error: `Target branch not found: ${targetBranch}`
+    }));
+    process.exit(1);
+  }
+
+  const source = lineage.branches[sourceBranch];
+  const target = lineage.branches[targetBranch];
+  const timestamp = new Date().toISOString();
+
+  // Create merge state
+  const mergeId = `merge_${String(lineage.merges.length + 1).padStart(3, '0')}`;
+  const newStateId = `state_${String(lineage.stateLog.length).padStart(3, '0')}`;
+
+  const mergeHash = crypto.createHash('sha256')
+    .update(JSON.stringify({
+      mergeId,
+      sourceBranch,
+      targetBranch,
+      sourceState: source.head,
+      targetState: target.head,
+      timestamp
+    }))
+    .digest('hex');
+
+  const mergeSignature = signTerms(mergeHash, 'merge');
+
+  const merge = {
+    mergeId,
+    timestamp,
+    sourceBranch,
+    targetBranch,
+    sourceState: source.head,
+    targetState: target.head,
+    resultState: newStateId,
+    conflictResolution: filters.resolution || 'auto',
+    signature: mergeSignature
+  };
+
+  lineage.merges.push(merge);
+
+  // Update target branch head
+  lineage.stateLog.push({
+    stateId: newStateId,
+    timestamp,
+    stateHash: `sha256:${mergeHash}`,
+    parentStateId: target.head,
+    event: 'merge',
+    eventData: {
+      mergeId,
+      sourceBranch,
+      targetBranch
+    },
+    signature: mergeSignature
+  });
+
+  lineage.branches[targetBranch].head = newStateId;
+
+  // Optionally delete source branch
+  if (filters['delete-source'] === 'true' || filters['delete-source'] === true) {
+    delete lineage.branches[sourceBranch];
+
+    // Also delete fork bundle if exists
+    const bundlePath = path.join(IDENTITY_DIR, 'forks', `${sourceBranch}.json`);
+    if (fs.existsSync(bundlePath)) {
+      fs.unlinkSync(bundlePath);
+    }
+  }
+
+  saveLineage(lineage);
+
+  // Log to autobiography
+  logAutobiographyEvent('fork_merged', {
+    mergeId,
+    sourceBranch,
+    targetBranch,
+    deleted: filters['delete-source'] === 'true' || filters['delete-source'] === true
+  });
+
+  const sourceDeleted = filters['delete-source'] === 'true' || filters['delete-source'] === true;
+  console.log(JSON.stringify({
+    success: true,
+    mergeId,
+    sourceBranch,
+    targetBranch,
+    sourceState: source.head,
+    targetState: target.head,
+    resultState: newStateId,
+    sourceDeleted,
+    message: 'Merge completed successfully'
+  }, null, 2));
+}
+
+/**
+ * Handle identity fork-policy command - view/modify fork policy
+ */
+function handleIdentityForkPolicy(args) {
+  const filters = parseFilters(args);
+
+  let policy = loadForkPolicy();
+  if (!policy) {
+    console.error(JSON.stringify({
+      error: 'No fork policy found',
+      hint: 'Initialize identity first'
+    }));
+    process.exit(1);
+  }
+
+  // If no modifying flags, show current policy
+  if (!filters.type && !filters['allow-forks'] && !filters['allow-merge'] &&
+      !filters['inherit-agreements'] && !filters['inherit-reputation']) {
+    console.log(JSON.stringify({
+      policyType: policy.policyType,
+      version: policy.version,
+      createdAt: policy.createdAt,
+      [policy.policyType]: policy[policy.policyType],
+      hint: 'Modify with: --type=lineage, --allow-forks, --allow-merge, etc.'
+    }, null, 2));
+    return;
+  }
+
+  // Modify policy
+  if (filters.type) {
+    const validTypes = ['singleton', 'lineage', 'delegate'];
+    if (!validTypes.includes(filters.type)) {
+      console.error(JSON.stringify({
+        error: `Invalid policy type: ${filters.type}`,
+        valid: validTypes
+      }));
+      process.exit(1);
+    }
+    policy.policyType = filters.type;
+  }
+
+  if (filters['allow-forks'] !== undefined) {
+    policy.lineage.allowForks = filters['allow-forks'] === 'true' || filters['allow-forks'] === true;
+  }
+
+  if (filters['allow-merge'] !== undefined) {
+    policy.lineage.mergeAllowed = filters['allow-merge'] === 'true' || filters['allow-merge'] === true;
+  }
+
+  if (filters['inherit-agreements'] !== undefined) {
+    policy.lineage.forkInheritsAgreements = filters['inherit-agreements'] === 'true';
+  }
+
+  if (filters['inherit-reputation']) {
+    const validValues = ['none', 'partial', 'full'];
+    if (validValues.includes(filters['inherit-reputation'])) {
+      policy.lineage.forkInheritsReputation = filters['inherit-reputation'];
+    }
+  }
+
+  if (filters['max-forks']) {
+    policy.lineage.maxForks = parseInt(filters['max-forks']) || 10;
+  }
+
+  policy.updatedAt = new Date().toISOString();
+  saveForkPolicy(policy);
+
+  // Log change to lineage
+  logLineageEvent('fork_policy_updated', {
+    policyType: policy.policyType,
+    allowForks: policy.lineage.allowForks
+  });
+
+  console.log(JSON.stringify({
+    success: true,
+    message: 'Fork policy updated',
+    policy: {
+      policyType: policy.policyType,
+      [policy.policyType]: policy[policy.policyType]
+    }
+  }, null, 2));
+}
+
+/**
+ * Handle identity lineage command - show lineage details
+ */
+function handleIdentityLineage(args) {
+  const filters = parseFilters(args);
+
+  const lineage = loadLineage();
+  if (!lineage) {
+    console.error(JSON.stringify({
+      error: 'No lineage found',
+      hint: 'Initialize identity first'
+    }));
+    process.exit(1);
+  }
+
+  // Show specific state
+  if (filters.state) {
+    const state = lineage.stateLog.find(s => s.stateId === filters.state);
+    if (!state) {
+      console.error(JSON.stringify({
+        error: `State not found: ${filters.state}`,
+        available: lineage.stateLog.map(s => s.stateId)
+      }));
+      process.exit(1);
+    }
+    console.log(JSON.stringify(state, null, 2));
+    return;
+  }
+
+  // Show recent states
+  const limit = parseInt(filters.limit) || 10;
+  const recentStates = lineage.stateLog.slice(-limit);
+
+  console.log(JSON.stringify({
+    genesisId: lineage.genesisId,
+    genesisTimestamp: lineage.genesisTimestamp,
+    currentBranch: lineage.currentBranch,
+    totalStates: lineage.stateLog.length,
+    recentStates: recentStates.map(s => ({
+      stateId: s.stateId,
+      event: s.event,
+      timestamp: s.timestamp,
+      parentStateId: s.parentStateId
+    })),
+    branches: Object.keys(lineage.branches),
+    merges: lineage.merges.length
+  }, null, 2));
 }
 
 // === HTTP SERVER MODE (v0.7.0) ===
