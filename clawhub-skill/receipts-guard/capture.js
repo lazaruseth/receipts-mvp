@@ -77,7 +77,7 @@ const RECEIPTS_DIR = path.join(
 const INDEX_FILE = path.join(RECEIPTS_DIR, 'index.json');
 
 // Version
-const VERSION = '0.8.0-rc';
+const VERSION = '0.8.0';
 
 // Arbitration directories
 const PROPOSALS_DIR = path.join(RECEIPTS_DIR, 'proposals');
@@ -103,6 +103,9 @@ const AUTOBIOGRAPHY_FILE = path.join(IDENTITY_DIR, 'autobiography.json');
 // Migration directories (v0.8.0-rc)
 const MIGRATIONS_DIR = path.join(IDENTITY_DIR, 'migrations');
 const LEASE_FILE = path.join(IDENTITY_DIR, 'lease.json');
+
+// Credentials directory (v0.8.0)
+const CREDENTIALS_DIR = path.join(IDENTITY_DIR, 'credentials');
 
 // DID Method
 const DID_METHOD = 'agent';
@@ -173,6 +176,41 @@ const REPUTATION_REGISTRY_ABI = [
   'function getSummary(uint256 agentId, address[] clientAddresses, string tag1, string tag2) external view returns (uint64 count, int128 summaryValue, uint8 decimals)',
   'function readFeedback(uint256 agentId, address clientAddress, uint64 feedbackIndex) external view returns (int128 value, uint8 valueDecimals, string tag1, string tag2, bool isRevoked)',
   'event FeedbackGiven(uint256 indexed agentId, address indexed clientAddress, uint64 feedbackIndex, int128 value)'
+];
+
+// === x402 PAYMENT CONFIGURATION (v0.8.0) ===
+
+// Common stablecoin addresses by chain
+const STABLECOIN_ADDRESSES = {
+  // Ethereum Mainnet
+  1: {
+    USDC: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+    USDT: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+    DAI: '0x6B175474E89094C44Da98b954EesJdF3Cce0E29D'
+  },
+  // Base
+  8453: {
+    USDC: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    USDbC: '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA',  // Bridged USDC
+    DAI: '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb'
+  },
+  // Sepolia (test tokens)
+  11155111: {
+    USDC: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238', // Circle test USDC
+    DAI: '0x3e622317f8C93f7328350cF0B56d9eD4C620C5d6'
+  }
+};
+
+// ERC20 ABI for token transfers
+const ERC20_ABI = [
+  'function transfer(address to, uint256 amount) external returns (bool)',
+  'function transferFrom(address from, address to, uint256 amount) external returns (bool)',
+  'function balanceOf(address account) external view returns (uint256)',
+  'function allowance(address owner, address spender) external view returns (uint256)',
+  'function approve(address spender, uint256 amount) external returns (bool)',
+  'function decimals() external view returns (uint8)',
+  'function symbol() external view returns (string)',
+  'event Transfer(address indexed from, address indexed to, uint256 value)'
 ];
 
 // Hook registry for framework integrations
@@ -250,6 +288,14 @@ switch (command) {
   // === ATTESTATION (v0.8.0) ===
   case 'attestation':
     handleAttestation(args.slice(1));
+    break;
+  // === CREDENTIALS (v0.8.0) ===
+  case 'credentials':
+    handleCredentials(args.slice(1));
+    break;
+  // === x402 PAYMENTS (v0.8.0) ===
+  case 'pay':
+    handlePay(args.slice(1));
     break;
   // === HTTP SERVER MODE (v0.7.0) ===
   case 'serve':
@@ -1727,7 +1773,7 @@ function handleFulfill(args) {
 }
 
 // === ARBITRATE COMMAND ===
-function handleArbitrate(args) {
+async function handleArbitrate(args) {
   const filters = parseFilters(args);
   const agreementId = filters.agreementId || filters.id;
   const reason = filters.reason;
@@ -1787,11 +1833,30 @@ function handleArbitrate(args) {
       process.exit(1);
     }
 
-    // Store payment proof (in production, would verify on-chain)
+    // Verify payment on-chain (v0.8.0)
     console.log(JSON.stringify({
-      status: 'payment_accepted',
+      status: 'verifying_payment',
       paymentProof,
-      note: 'Payment proof recorded. On-chain verification available in future version.'
+      message: 'Verifying payment on-chain...'
+    }, null, 2));
+
+    // Async verification - wrap in promise for sync context
+    const verificationResult = await verifyX402Payment(paymentProof, agreement.x402);
+
+    if (!verificationResult.verified) {
+      console.error(JSON.stringify({
+        error: 'Payment verification failed',
+        reason: verificationResult.error,
+        hint: 'Ensure payment was sent to the correct address with sufficient amount',
+        usage: `pay verify --txHash=${paymentProof} --chain=${getChainNameById(agreement.x402.arbitrationChain) || 'base'}`
+      }));
+      process.exit(1);
+    }
+
+    console.log(JSON.stringify({
+      status: 'payment_verified',
+      paymentProof,
+      verification: verificationResult
     }, null, 2));
   }
 
@@ -3034,6 +3099,13 @@ function handleIdentity(args) {
     case 'lease':
       handleIdentityLease(args.slice(1));
       break;
+    // === AUTOBIOGRAPHY (v0.8.0) ===
+    case 'autobiography':
+      handleIdentityAutobiography(args.slice(1));
+      break;
+    case 'log':
+      handleIdentityLog(args.slice(1));
+      break;
     default:
       showIdentityHelp();
   }
@@ -3971,8 +4043,9 @@ function getChainStatus() {
 function showIdentityHelp() {
   console.log(JSON.stringify({
     command: 'identity',
-    description: 'Self-sovereign agent identity management (v0.6.0)',
+    description: 'Self-sovereign agent identity management (v0.8.0)',
     subcommands: {
+      // Core identity
       init: {
         usage: 'identity init --namespace=X --name=Y [--controller-twitter=@handle]',
         description: 'Create new identity with Ed25519 keypair'
@@ -3989,6 +4062,7 @@ function showIdentityHelp() {
         usage: 'identity verify --did=DID | --signature=SIG --termsHash=HASH',
         description: 'Verify identity or signature'
       },
+      // Controller
       'set-controller': {
         usage: 'identity set-controller --twitter=@handle',
         description: 'Set human controller for recovery'
@@ -4001,6 +4075,7 @@ function showIdentityHelp() {
         usage: 'identity recover --controller-proof=URL [--confirm]',
         description: 'Recover identity using human controller'
       },
+      // Publishing
       publish: {
         usage: 'identity publish [--platform=moltbook|ipfs|local]',
         description: 'Publish DID document'
@@ -4009,13 +4084,53 @@ function showIdentityHelp() {
         usage: 'identity export',
         description: 'Export public DID document'
       },
+      // On-chain (v0.7.0)
       anchor: {
         usage: 'identity anchor --chain=ethereum|base|sepolia',
-        description: 'Anchor identity to ERC-8004 registry on-chain (v0.7.0)'
+        description: 'Anchor identity to ERC-8004 registry on-chain'
       },
       resolve: {
         usage: 'identity resolve --did=DID [--chain=CHAIN]',
-        description: 'Resolve DID from local or on-chain registry (v0.7.0)'
+        description: 'Resolve DID from local or on-chain registry'
+      },
+      // Fork handling (v0.8.0-beta)
+      fork: {
+        usage: 'identity fork --name=NAME [--reason=REASON]',
+        description: 'Create descendant identity (requires lineage policy)'
+      },
+      forks: {
+        usage: 'identity forks',
+        description: 'List all forks in lineage tree'
+      },
+      merge: {
+        usage: 'identity merge --source=FORK_ID --target=BRANCH',
+        description: 'Merge fork back into target branch'
+      },
+      'fork-policy': {
+        usage: 'identity fork-policy [--type=singleton|lineage|delegate] [--allow-forks]',
+        description: 'View or modify fork policy'
+      },
+      lineage: {
+        usage: 'identity lineage [--full]',
+        description: 'View lineage/state history'
+      },
+      // Migration (v0.8.0-rc)
+      migrate: {
+        usage: 'identity migrate export|import|verify|status [--destination=DID] [--bundle=FILE]',
+        description: 'Mind-body migration between hosts'
+      },
+      lease: {
+        usage: 'identity lease [--acquire|--release|--renew|--status]',
+        description: 'Singleton lease management'
+      },
+      // Autobiography (v0.8.0)
+      autobiography: {
+        usage: 'identity autobiography [--full|--events] [--since=DATE] [--type=TYPE] [--export --filter=public|private|full]',
+        description: 'View or export autobiographical memory'
+      },
+      log: {
+        usage: 'identity log --type=TYPE --data=JSON',
+        description: 'Manually log event to autobiography'
       }
     },
     chains: getChainStatus(),
@@ -6181,6 +6296,1587 @@ function renewLease(holderId) {
 function releaseLease() {
   if (fs.existsSync(LEASE_FILE)) {
     fs.unlinkSync(LEASE_FILE);
+  }
+}
+
+// === AUTOBIOGRAPHY COMMANDS (v0.8.0) ===
+
+/**
+ * Handle identity autobiography command
+ * View and manage autobiographical memory
+ */
+function handleIdentityAutobiography(args) {
+  const filters = parseFilters(args);
+
+  const autobiography = loadAutobiography();
+  if (!autobiography) {
+    console.error(JSON.stringify({
+      error: 'No autobiography found',
+      hint: 'Initialize identity first: node capture.js identity init'
+    }));
+    process.exit(1);
+  }
+
+  // Export mode - privacy filtered
+  if (filters.export) {
+    const filterLevel = filters.filter || 'public';
+    const exported = exportAutobiography(autobiography, filterLevel);
+
+    if (filters.output) {
+      fs.writeFileSync(filters.output, JSON.stringify(exported, null, 2));
+      console.log(JSON.stringify({
+        success: true,
+        message: `Autobiography exported to ${filters.output}`,
+        filterLevel,
+        eventCount: exported.eventLog.length
+      }, null, 2));
+    } else {
+      console.log(JSON.stringify(exported, null, 2));
+    }
+    return;
+  }
+
+  // Rebuild mode - recompute currentState from eventLog
+  if (filters.rebuild) {
+    const rebuilt = rebuildAutobiographyState(autobiography);
+    saveAutobiography(rebuilt);
+    console.log(JSON.stringify({
+      success: true,
+      message: 'Autobiography state rebuilt from event log',
+      currentState: rebuilt.currentState
+    }, null, 2));
+    return;
+  }
+
+  // Filter by date
+  let events = autobiography.eventLog;
+  if (filters.since) {
+    const sinceDate = filters.since === 'today'
+      ? new Date().toISOString().split('T')[0]
+      : filters.since;
+    events = events.filter(e => e.timestamp >= sinceDate);
+  }
+
+  // Filter by event type
+  if (filters.type) {
+    events = events.filter(e => e.eventType === filters.type);
+  }
+
+  // Summary mode (default)
+  if (!filters.full && !filters.events) {
+    console.log(JSON.stringify({
+      agentDid: autobiography.agentDid,
+      eventCount: events.length,
+      totalEvents: autobiography.eventLog.length,
+      currentState: {
+        skills: autobiography.currentState.skills.length,
+        relationships: autobiography.currentState.relationships.length,
+        activeCommitments: autobiography.currentState.activeCommitments.length,
+        reputation: autobiography.currentState.reputation
+      },
+      recentEvents: events.slice(-5).map(e => ({
+        eventId: e.eventId,
+        timestamp: e.timestamp,
+        eventType: e.eventType
+      })),
+      eventTypes: countEventTypes(autobiography.eventLog),
+      hint: 'Use --full for complete state, --events for all events'
+    }, null, 2));
+    return;
+  }
+
+  // Events mode
+  if (filters.events) {
+    const limit = parseInt(filters.limit) || 50;
+    const offset = parseInt(filters.offset) || 0;
+    const paginatedEvents = events.slice(offset, offset + limit);
+
+    console.log(JSON.stringify({
+      agentDid: autobiography.agentDid,
+      events: paginatedEvents,
+      pagination: {
+        total: events.length,
+        offset,
+        limit,
+        hasMore: offset + limit < events.length
+      }
+    }, null, 2));
+    return;
+  }
+
+  // Full mode
+  console.log(JSON.stringify(autobiography, null, 2));
+}
+
+/**
+ * Count event types in log
+ */
+function countEventTypes(eventLog) {
+  const counts = {};
+  for (const event of eventLog) {
+    counts[event.eventType] = (counts[event.eventType] || 0) + 1;
+  }
+  return counts;
+}
+
+/**
+ * Export autobiography with privacy filtering
+ */
+function exportAutobiography(autobiography, filterLevel) {
+  const exported = {
+    agentDid: autobiography.agentDid,
+    exportedAt: new Date().toISOString(),
+    filterLevel,
+    eventLog: [],
+    currentState: {}
+  };
+
+  // Filter events based on privacy level
+  const publicEventTypes = [
+    'genesis',
+    'agreement_accepted',
+    'agreement_fulfilled',
+    'arbitration_won',
+    'arbitration_lost',
+    'key_rotated',
+    'fork_created',
+    'migration_completed'
+  ];
+
+  const privateEventTypes = [
+    'skill_acquired',
+    'preference_updated',
+    'relationship_formed'
+  ];
+
+  for (const event of autobiography.eventLog) {
+    if (filterLevel === 'full') {
+      exported.eventLog.push(event);
+    } else if (filterLevel === 'private') {
+      // Include public + private (exclude internal)
+      if (publicEventTypes.includes(event.eventType) ||
+          privateEventTypes.includes(event.eventType)) {
+        exported.eventLog.push(event);
+      }
+    } else {
+      // 'public' - only public events
+      if (publicEventTypes.includes(event.eventType)) {
+        exported.eventLog.push(event);
+      }
+    }
+  }
+
+  // Filter current state
+  if (filterLevel === 'full') {
+    exported.currentState = autobiography.currentState;
+  } else if (filterLevel === 'private') {
+    exported.currentState = {
+      skills: autobiography.currentState.skills,
+      relationships: autobiography.currentState.relationships.map(r => ({
+        did: r.did,
+        type: r.type,
+        since: r.since
+      })),
+      activeCommitments: autobiography.currentState.activeCommitments,
+      reputation: autobiography.currentState.reputation,
+      // Exclude preferences
+    };
+  } else {
+    // 'public' - minimal
+    exported.currentState = {
+      reputation: autobiography.currentState.reputation,
+      activeCommitments: autobiography.currentState.activeCommitments.length,
+      skillCount: autobiography.currentState.skills.length
+    };
+  }
+
+  return exported;
+}
+
+/**
+ * Rebuild autobiography state from event log
+ */
+function rebuildAutobiographyState(autobiography) {
+  // Reset current state
+  autobiography.currentState = {
+    skills: [],
+    relationships: [],
+    preferences: {
+      riskTolerance: 0.5,
+      preferredArbiters: [],
+      maxAgreementValue: null
+    },
+    activeCommitments: [],
+    reputation: {
+      agreementsCompleted: 0,
+      agreementsFailed: 0,
+      arbitrationsWon: 0,
+      arbitrationsLost: 0,
+      score: 1.0
+    }
+  };
+
+  // Replay all events
+  for (const event of autobiography.eventLog) {
+    updateAutobiographyState(autobiography, event.eventType, event.data);
+  }
+
+  return autobiography;
+}
+
+/**
+ * Handle identity log command
+ * Manually add events to autobiography
+ */
+function handleIdentityLog(args) {
+  const filters = parseFilters(args);
+
+  const autobiography = loadAutobiography();
+  if (!autobiography) {
+    console.error(JSON.stringify({
+      error: 'No autobiography found',
+      hint: 'Initialize identity first: node capture.js identity init'
+    }));
+    process.exit(1);
+  }
+
+  if (!filters.type) {
+    console.log(JSON.stringify({
+      usage: 'identity log --type=EVENT_TYPE --data=JSON',
+      supportedTypes: [
+        'skill_acquired',
+        'preference_updated',
+        'relationship_formed',
+        'note',
+        'milestone',
+        'external_event'
+      ],
+      examples: [
+        'identity log --type=skill_acquired --data=\'{"skill":"rust","proficiency":0.6}\'',
+        'identity log --type=preference_updated --data=\'{"preference":"riskTolerance","value":0.3}\'',
+        'identity log --type=note --data=\'{"content":"Completed first commercial audit"}\''
+      ]
+    }, null, 2));
+    return;
+  }
+
+  // Parse data
+  let data = {};
+  if (filters.data) {
+    try {
+      data = JSON.parse(filters.data);
+    } catch (e) {
+      console.error(JSON.stringify({
+        error: 'Invalid JSON in --data',
+        received: filters.data
+      }));
+      process.exit(1);
+    }
+  }
+
+  // Validate event type
+  const allowedTypes = [
+    'skill_acquired',
+    'preference_updated',
+    'relationship_formed',
+    'note',
+    'milestone',
+    'external_event'
+  ];
+
+  if (!allowedTypes.includes(filters.type)) {
+    console.error(JSON.stringify({
+      error: `Invalid event type: ${filters.type}`,
+      allowed: allowedTypes
+    }));
+    process.exit(1);
+  }
+
+  // Validate required data fields for specific types
+  const requiredFields = {
+    skill_acquired: ['skill'],
+    preference_updated: ['preference', 'value'],
+    relationship_formed: ['counterparty', 'relationshipType'],
+    note: ['content'],
+    milestone: ['title'],
+    external_event: ['description']
+  };
+
+  const required = requiredFields[filters.type] || [];
+  const missing = required.filter(f => !data[f]);
+
+  if (missing.length > 0) {
+    console.error(JSON.stringify({
+      error: `Missing required fields for ${filters.type}`,
+      missing,
+      required
+    }));
+    process.exit(1);
+  }
+
+  // Log the event
+  const event = logAutobiographyEvent(filters.type, data);
+
+  if (!event) {
+    console.error(JSON.stringify({
+      error: 'Failed to log event'
+    }));
+    process.exit(1);
+  }
+
+  console.log(JSON.stringify({
+    success: true,
+    message: `Event logged to autobiography`,
+    event: {
+      eventId: event.eventId,
+      timestamp: event.timestamp,
+      eventType: event.eventType,
+      data: event.data
+    }
+  }, null, 2));
+}
+
+// === CREDENTIALS (v0.8.0) ===
+// W3C Verifiable Credentials support
+
+/**
+ * Handle credentials command
+ * Manage W3C Verifiable Credentials
+ */
+function handleCredentials(args) {
+  const subCommand = args[0];
+
+  switch (subCommand) {
+    case 'list':
+      handleCredentialsList(args.slice(1));
+      break;
+    case 'import':
+      handleCredentialsImport(args.slice(1));
+      break;
+    case 'verify':
+      handleCredentialsVerify(args.slice(1));
+      break;
+    case 'present':
+      handleCredentialsPresent(args.slice(1));
+      break;
+    case 'issue':
+      handleCredentialsIssue(args.slice(1));
+      break;
+    case 'revoke':
+      handleCredentialsRevoke(args.slice(1));
+      break;
+    default:
+      showCredentialsHelp();
+  }
+}
+
+/**
+ * Show credentials help
+ */
+function showCredentialsHelp() {
+  console.log(JSON.stringify({
+    command: 'credentials',
+    description: 'W3C Verifiable Credentials management (v0.8.0)',
+    subcommands: {
+      list: {
+        usage: 'credentials list [--type=TYPE] [--valid-only]',
+        description: 'List all credentials'
+      },
+      import: {
+        usage: 'credentials import --file=FILE | --json=JSON',
+        description: 'Import a verifiable credential'
+      },
+      verify: {
+        usage: 'credentials verify --id=CREDENTIAL_ID | --file=FILE',
+        description: 'Verify credential signature and validity'
+      },
+      present: {
+        usage: 'credentials present --ids=ID1,ID2 --to=DID [--output=FILE]',
+        description: 'Create a verifiable presentation for a counterparty'
+      },
+      issue: {
+        usage: 'credentials issue --type=TYPE --subject=DID --claims=JSON [--expires=DATE]',
+        description: 'Issue a credential to another agent (requires issuer authority)'
+      },
+      revoke: {
+        usage: 'credentials revoke --id=CREDENTIAL_ID [--reason=REASON]',
+        description: 'Revoke a credential you issued'
+      }
+    },
+    credentialTypes: [
+      'AgentCapabilityCredential',
+      'InsuranceCredential',
+      'ComplianceCredential',
+      'RegistrationCredential',
+      'ReputationCredential'
+    ],
+    version: VERSION
+  }, null, 2));
+}
+
+/**
+ * Ensure credentials directory exists
+ */
+function ensureCredentialsDir() {
+  if (!fs.existsSync(CREDENTIALS_DIR)) {
+    fs.mkdirSync(CREDENTIALS_DIR, { recursive: true });
+  }
+}
+
+/**
+ * Load all credentials
+ */
+function loadAllCredentials() {
+  ensureCredentialsDir();
+  const credentials = [];
+
+  const files = fs.readdirSync(CREDENTIALS_DIR).filter(f => f.endsWith('.json'));
+  for (const file of files) {
+    try {
+      const credential = JSON.parse(fs.readFileSync(path.join(CREDENTIALS_DIR, file), 'utf8'));
+      credentials.push(credential);
+    } catch (e) {
+      // Skip invalid files
+    }
+  }
+
+  return credentials;
+}
+
+/**
+ * Load credential by ID
+ */
+function loadCredential(id) {
+  const filePath = path.join(CREDENTIALS_DIR, `${id}.json`);
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Save credential
+ */
+function saveCredential(credential) {
+  ensureCredentialsDir();
+  const filePath = path.join(CREDENTIALS_DIR, `${credential.id}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(credential, null, 2));
+}
+
+/**
+ * Handle credentials list
+ */
+function handleCredentialsList(args) {
+  const filters = parseFilters(args);
+
+  let credentials = loadAllCredentials();
+
+  // Filter by type
+  if (filters.type) {
+    credentials = credentials.filter(c =>
+      c.type?.includes(filters.type) ||
+      c.type?.includes(`${filters.type}Credential`)
+    );
+  }
+
+  // Filter by validity
+  if (filters['valid-only']) {
+    const now = new Date().toISOString();
+    credentials = credentials.filter(c => {
+      if (c.expirationDate && c.expirationDate < now) return false;
+      if (c.revoked) return false;
+      return true;
+    });
+  }
+
+  console.log(JSON.stringify({
+    count: credentials.length,
+    credentials: credentials.map(c => ({
+      id: c.id,
+      type: c.type,
+      issuer: c.issuer,
+      subject: c.credentialSubject?.id,
+      issuanceDate: c.issuanceDate,
+      expirationDate: c.expirationDate,
+      revoked: c.revoked || false,
+      valid: isCredentialValid(c)
+    }))
+  }, null, 2));
+}
+
+/**
+ * Check if credential is valid (not expired, not revoked)
+ */
+function isCredentialValid(credential) {
+  const now = new Date().toISOString();
+  if (credential.expirationDate && credential.expirationDate < now) return false;
+  if (credential.revoked) return false;
+  return true;
+}
+
+/**
+ * Handle credentials import
+ */
+function handleCredentialsImport(args) {
+  const filters = parseFilters(args);
+
+  let credential;
+
+  if (filters.file) {
+    if (!fs.existsSync(filters.file)) {
+      console.error(JSON.stringify({
+        error: 'File not found',
+        file: filters.file
+      }));
+      process.exit(1);
+    }
+    try {
+      credential = JSON.parse(fs.readFileSync(filters.file, 'utf8'));
+    } catch (e) {
+      console.error(JSON.stringify({
+        error: 'Invalid JSON in file',
+        file: filters.file
+      }));
+      process.exit(1);
+    }
+  } else if (filters.json) {
+    try {
+      credential = JSON.parse(filters.json);
+    } catch (e) {
+      console.error(JSON.stringify({
+        error: 'Invalid JSON'
+      }));
+      process.exit(1);
+    }
+  } else {
+    console.error(JSON.stringify({
+      error: 'Provide --file or --json',
+      usage: 'credentials import --file=credential.json'
+    }));
+    process.exit(1);
+  }
+
+  // Validate credential structure
+  if (!credential.id) {
+    credential.id = `vc_${crypto.randomBytes(8).toString('hex')}`;
+  }
+
+  if (!credential['@context']) {
+    credential['@context'] = [
+      'https://www.w3.org/2018/credentials/v1',
+      'https://receipts.protocol/credentials/v1'
+    ];
+  }
+
+  if (!credential.type || !Array.isArray(credential.type)) {
+    console.error(JSON.stringify({
+      error: 'Credential must have type array',
+      hint: 'type should be ["VerifiableCredential", "SpecificCredentialType"]'
+    }));
+    process.exit(1);
+  }
+
+  // Verify signature if present
+  let signatureValid = null;
+  if (credential.proof) {
+    signatureValid = verifyCredentialSignature(credential);
+  }
+
+  // Save credential
+  saveCredential(credential);
+
+  // Log to autobiography
+  logAutobiographyEvent('credential_imported', {
+    credentialId: credential.id,
+    type: credential.type,
+    issuer: credential.issuer
+  });
+
+  console.log(JSON.stringify({
+    success: true,
+    message: 'Credential imported',
+    credential: {
+      id: credential.id,
+      type: credential.type,
+      issuer: credential.issuer,
+      subject: credential.credentialSubject?.id,
+      signatureVerified: signatureValid
+    }
+  }, null, 2));
+}
+
+/**
+ * Verify credential signature
+ */
+function verifyCredentialSignature(credential) {
+  if (!credential.proof) return null;
+
+  try {
+    const { type, proofValue, verificationMethod } = credential.proof;
+
+    if (type !== 'Ed25519Signature2020') {
+      return null; // Unsupported proof type
+    }
+
+    // Extract the credential without proof for verification
+    const credentialCopy = { ...credential };
+    delete credentialCopy.proof;
+
+    const credentialHash = crypto.createHash('sha256')
+      .update(JSON.stringify(credentialCopy))
+      .digest('hex');
+
+    // For now, return null if we can't resolve the issuer's key
+    // Full implementation would resolve DID and verify
+    return null;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Handle credentials verify
+ */
+function handleCredentialsVerify(args) {
+  const filters = parseFilters(args);
+
+  let credential;
+
+  if (filters.id) {
+    credential = loadCredential(filters.id);
+    if (!credential) {
+      console.error(JSON.stringify({
+        error: 'Credential not found',
+        id: filters.id
+      }));
+      process.exit(1);
+    }
+  } else if (filters.file) {
+    if (!fs.existsSync(filters.file)) {
+      console.error(JSON.stringify({
+        error: 'File not found',
+        file: filters.file
+      }));
+      process.exit(1);
+    }
+    credential = JSON.parse(fs.readFileSync(filters.file, 'utf8'));
+  } else {
+    console.error(JSON.stringify({
+      error: 'Provide --id or --file',
+      usage: 'credentials verify --id=vc_xxx'
+    }));
+    process.exit(1);
+  }
+
+  const now = new Date().toISOString();
+  const checks = {
+    hasContext: !!credential['@context'],
+    hasType: Array.isArray(credential.type) && credential.type.includes('VerifiableCredential'),
+    hasIssuer: !!credential.issuer,
+    hasSubject: !!credential.credentialSubject,
+    hasIssuanceDate: !!credential.issuanceDate,
+    notExpired: !credential.expirationDate || credential.expirationDate >= now,
+    notRevoked: !credential.revoked,
+    hasProof: !!credential.proof,
+    signatureValid: credential.proof ? verifyCredentialSignature(credential) : null
+  };
+
+  const isValid = checks.hasContext &&
+    checks.hasType &&
+    checks.hasIssuer &&
+    checks.hasSubject &&
+    checks.notExpired &&
+    checks.notRevoked;
+
+  console.log(JSON.stringify({
+    credentialId: credential.id,
+    valid: isValid,
+    checks,
+    credential: filters.full ? credential : undefined
+  }, null, 2));
+}
+
+/**
+ * Handle credentials present
+ * Create a Verifiable Presentation
+ */
+function handleCredentialsPresent(args) {
+  const filters = parseFilters(args);
+
+  if (!filters.ids) {
+    console.error(JSON.stringify({
+      error: 'Provide credential IDs',
+      usage: 'credentials present --ids=vc_xxx,vc_yyy --to=did:agent:other'
+    }));
+    process.exit(1);
+  }
+
+  if (!filters.to) {
+    console.error(JSON.stringify({
+      error: 'Provide recipient DID',
+      usage: 'credentials present --ids=vc_xxx --to=did:agent:other'
+    }));
+    process.exit(1);
+  }
+
+  const didDocument = loadLocalDID();
+  if (!didDocument) {
+    console.error(JSON.stringify({
+      error: 'No identity found',
+      hint: 'Initialize identity first'
+    }));
+    process.exit(1);
+  }
+
+  const credentialIds = filters.ids.split(',');
+  const credentials = [];
+
+  for (const id of credentialIds) {
+    const credential = loadCredential(id.trim());
+    if (!credential) {
+      console.error(JSON.stringify({
+        error: 'Credential not found',
+        id: id.trim()
+      }));
+      process.exit(1);
+    }
+
+    if (!isCredentialValid(credential)) {
+      console.error(JSON.stringify({
+        error: 'Credential is not valid (expired or revoked)',
+        id: id.trim()
+      }));
+      process.exit(1);
+    }
+
+    credentials.push(credential);
+  }
+
+  // Create Verifiable Presentation
+  const presentationId = `vp_${crypto.randomBytes(8).toString('hex')}`;
+  const timestamp = new Date().toISOString();
+
+  const presentation = {
+    '@context': [
+      'https://www.w3.org/2018/credentials/v1',
+      'https://receipts.protocol/credentials/v1'
+    ],
+    id: presentationId,
+    type: ['VerifiablePresentation'],
+    holder: didDocument.id,
+    verifiableCredential: credentials,
+    created: timestamp,
+    domain: filters.to,
+    challenge: filters.challenge || crypto.randomBytes(16).toString('hex'),
+    proof: null
+  };
+
+  // Sign the presentation
+  const presentationHash = crypto.createHash('sha256')
+    .update(JSON.stringify({ ...presentation, proof: undefined }))
+    .digest('hex');
+
+  const signature = signTerms(presentationHash, 'presentation');
+
+  presentation.proof = {
+    type: 'Ed25519Signature2020',
+    created: timestamp,
+    verificationMethod: `${didDocument.id}#key-1`,
+    proofPurpose: 'authentication',
+    proofValue: signature
+  };
+
+  // Log to autobiography
+  logAutobiographyEvent('credentials_presented', {
+    presentationId,
+    credentialIds,
+    to: filters.to
+  });
+
+  if (filters.output) {
+    fs.writeFileSync(filters.output, JSON.stringify(presentation, null, 2));
+    console.log(JSON.stringify({
+      success: true,
+      message: `Presentation saved to ${filters.output}`,
+      presentationId,
+      credentialCount: credentials.length,
+      to: filters.to
+    }, null, 2));
+  } else {
+    console.log(JSON.stringify(presentation, null, 2));
+  }
+}
+
+/**
+ * Handle credentials issue
+ * Issue a new credential (self as issuer)
+ */
+function handleCredentialsIssue(args) {
+  const filters = parseFilters(args);
+
+  if (!filters.type) {
+    console.error(JSON.stringify({
+      error: 'Provide credential type',
+      usage: 'credentials issue --type=AgentCapability --subject=did:agent:other --claims=\'{"capability":"audit"}\''
+    }));
+    process.exit(1);
+  }
+
+  if (!filters.subject) {
+    console.error(JSON.stringify({
+      error: 'Provide subject DID',
+      usage: 'credentials issue --type=AgentCapability --subject=did:agent:other'
+    }));
+    process.exit(1);
+  }
+
+  const didDocument = loadLocalDID();
+  if (!didDocument) {
+    console.error(JSON.stringify({
+      error: 'No identity found',
+      hint: 'Initialize identity first'
+    }));
+    process.exit(1);
+  }
+
+  let claims = {};
+  if (filters.claims) {
+    try {
+      claims = JSON.parse(filters.claims);
+    } catch (e) {
+      console.error(JSON.stringify({
+        error: 'Invalid JSON in --claims'
+      }));
+      process.exit(1);
+    }
+  }
+
+  const credentialId = `vc_${crypto.randomBytes(8).toString('hex')}`;
+  const timestamp = new Date().toISOString();
+
+  // Calculate expiration (default 1 year)
+  let expirationDate = null;
+  if (filters.expires) {
+    expirationDate = new Date(filters.expires).toISOString();
+  } else if (!filters['no-expiry']) {
+    const oneYear = new Date();
+    oneYear.setFullYear(oneYear.getFullYear() + 1);
+    expirationDate = oneYear.toISOString();
+  }
+
+  const credentialType = filters.type.includes('Credential')
+    ? filters.type
+    : `${filters.type}Credential`;
+
+  const credential = {
+    '@context': [
+      'https://www.w3.org/2018/credentials/v1',
+      'https://receipts.protocol/credentials/v1'
+    ],
+    id: credentialId,
+    type: ['VerifiableCredential', credentialType],
+    issuer: didDocument.id,
+    issuanceDate: timestamp,
+    expirationDate,
+    credentialSubject: {
+      id: filters.subject,
+      ...claims
+    },
+    proof: null
+  };
+
+  // Sign the credential
+  const credentialHash = crypto.createHash('sha256')
+    .update(JSON.stringify({ ...credential, proof: undefined }))
+    .digest('hex');
+
+  const signature = signTerms(credentialHash, 'credential');
+
+  credential.proof = {
+    type: 'Ed25519Signature2020',
+    created: timestamp,
+    verificationMethod: `${didDocument.id}#key-1`,
+    proofPurpose: 'assertionMethod',
+    proofValue: signature
+  };
+
+  // Save credential
+  saveCredential(credential);
+
+  // Log to autobiography
+  logAutobiographyEvent('credential_issued', {
+    credentialId,
+    type: credential.type,
+    subject: filters.subject
+  });
+
+  console.log(JSON.stringify({
+    success: true,
+    message: 'Credential issued',
+    credential
+  }, null, 2));
+}
+
+/**
+ * Handle credentials revoke
+ */
+function handleCredentialsRevoke(args) {
+  const filters = parseFilters(args);
+
+  if (!filters.id) {
+    console.error(JSON.stringify({
+      error: 'Provide credential ID',
+      usage: 'credentials revoke --id=vc_xxx --reason="Compromised"'
+    }));
+    process.exit(1);
+  }
+
+  const credential = loadCredential(filters.id);
+  if (!credential) {
+    console.error(JSON.stringify({
+      error: 'Credential not found',
+      id: filters.id
+    }));
+    process.exit(1);
+  }
+
+  const didDocument = loadLocalDID();
+  if (!didDocument) {
+    console.error(JSON.stringify({ error: 'No identity found' }));
+    process.exit(1);
+  }
+
+  // Check if we're the issuer
+  if (credential.issuer !== didDocument.id) {
+    console.error(JSON.stringify({
+      error: 'Cannot revoke credential issued by another party',
+      issuer: credential.issuer,
+      you: didDocument.id
+    }));
+    process.exit(1);
+  }
+
+  // Mark as revoked
+  credential.revoked = true;
+  credential.revocationDate = new Date().toISOString();
+  credential.revocationReason = filters.reason || 'Revoked by issuer';
+
+  saveCredential(credential);
+
+  // Log to autobiography
+  logAutobiographyEvent('credential_revoked', {
+    credentialId: credential.id,
+    reason: credential.revocationReason
+  });
+
+  console.log(JSON.stringify({
+    success: true,
+    message: 'Credential revoked',
+    credentialId: credential.id,
+    revocationDate: credential.revocationDate,
+    reason: credential.revocationReason
+  }, null, 2));
+}
+
+// === x402 PAYMENT HANDLERS (v0.8.0) ===
+
+/**
+ * Handle pay command
+ * Initiate or verify x402 payments
+ */
+function handlePay(args) {
+  const subCommand = args[0];
+
+  switch (subCommand) {
+    case 'verify':
+      handlePayVerify(args.slice(1));
+      break;
+    case 'quote':
+      handlePayQuote(args.slice(1));
+      break;
+    case 'send':
+      handlePaySend(args.slice(1));
+      break;
+    case 'status':
+      handlePayStatus(args.slice(1));
+      break;
+    default:
+      showPayHelp();
+  }
+}
+
+/**
+ * Show pay help
+ */
+function showPayHelp() {
+  console.log(JSON.stringify({
+    command: 'pay',
+    description: 'x402 payment management (v0.8.0)',
+    subcommands: {
+      quote: {
+        usage: 'pay quote --agreementId=AGR_ID',
+        description: 'Get payment quote for arbitration fee'
+      },
+      verify: {
+        usage: 'pay verify --txHash=0x... --chain=base [--agreementId=AGR_ID]',
+        description: 'Verify a payment transaction on-chain'
+      },
+      send: {
+        usage: 'pay send --to=0x... --amount=10 --token=USDC --chain=base [--agreementId=AGR_ID]',
+        description: 'Send payment (requires RECEIPTS_WALLET_PRIVATE_KEY)'
+      },
+      status: {
+        usage: 'pay status --agreementId=AGR_ID',
+        description: 'Check payment status for an agreement/arbitration'
+      }
+    },
+    supportedChains: Object.keys(CHAIN_CONFIG).filter(c => STABLECOIN_ADDRESSES[CHAIN_CONFIG[c].chainId]),
+    supportedTokens: ['USDC', 'USDT', 'DAI'],
+    version: VERSION
+  }, null, 2));
+}
+
+/**
+ * Handle pay quote - Get payment requirements
+ */
+function handlePayQuote(args) {
+  const filters = parseFilters(args);
+
+  if (!filters.agreementId) {
+    console.error(JSON.stringify({
+      error: 'Provide agreement ID',
+      usage: 'pay quote --agreementId=agr_xxx'
+    }));
+    process.exit(1);
+  }
+
+  const agreementFile = path.join(AGREEMENTS_DIR, `${filters.agreementId}.json`);
+  if (!fs.existsSync(agreementFile)) {
+    console.error(JSON.stringify({
+      error: 'Agreement not found',
+      agreementId: filters.agreementId
+    }));
+    process.exit(1);
+  }
+
+  const agreement = JSON.parse(fs.readFileSync(agreementFile, 'utf8'));
+
+  if (!agreement.x402) {
+    console.log(JSON.stringify({
+      agreementId: filters.agreementId,
+      paymentRequired: false,
+      message: 'This agreement has no x402 payment terms'
+    }, null, 2));
+    return;
+  }
+
+  const chainName = getChainNameById(agreement.x402.arbitrationChain) || 'base';
+  const chainConfig = CHAIN_CONFIG[chainName];
+
+  console.log(JSON.stringify({
+    agreementId: filters.agreementId,
+    paymentRequired: true,
+    x402: {
+      cost: agreement.x402.arbitrationCost,
+      token: agreement.x402.arbitrationToken || 'USDC',
+      chain: chainName,
+      chainId: agreement.x402.arbitrationChain || 8453,
+      recipient: agreement.x402.paymentAddress || 'arbiter',
+      tokenAddress: STABLECOIN_ADDRESSES[agreement.x402.arbitrationChain || 8453]?.[agreement.x402.arbitrationToken || 'USDC']
+    },
+    instructions: {
+      step1: `Ensure you have ${agreement.x402.arbitrationCost} ${agreement.x402.arbitrationToken || 'USDC'} on ${chainName}`,
+      step2: `Send to: ${agreement.x402.paymentAddress || 'arbiter address (resolve via identity)'}`,
+      step3: `Use the tx hash with: pay verify --txHash=0x... --chain=${chainName} --agreementId=${filters.agreementId}`
+    }
+  }, null, 2));
+}
+
+/**
+ * Get chain name from chain ID
+ */
+function getChainNameById(chainId) {
+  for (const [name, config] of Object.entries(CHAIN_CONFIG)) {
+    if (config.chainId === chainId) return name;
+  }
+  return null;
+}
+
+/**
+ * Handle pay verify - Verify on-chain payment
+ */
+async function handlePayVerify(args) {
+  const filters = parseFilters(args);
+
+  if (!filters.txHash) {
+    console.error(JSON.stringify({
+      error: 'Provide transaction hash',
+      usage: 'pay verify --txHash=0x... --chain=base'
+    }));
+    process.exit(1);
+  }
+
+  const chainName = filters.chain || 'base';
+  const chainConfig = CHAIN_CONFIG[chainName];
+
+  if (!chainConfig) {
+    console.error(JSON.stringify({
+      error: 'Invalid chain',
+      chain: chainName,
+      supported: Object.keys(CHAIN_CONFIG)
+    }));
+    process.exit(1);
+  }
+
+  try {
+    const { ethers } = require('ethers');
+    const provider = new ethers.JsonRpcProvider(chainConfig.rpc);
+
+    console.log(JSON.stringify({
+      status: 'verifying',
+      txHash: filters.txHash,
+      chain: chainName,
+      rpc: chainConfig.rpc
+    }, null, 2));
+
+    const receipt = await provider.getTransactionReceipt(filters.txHash);
+
+    if (!receipt) {
+      console.log(JSON.stringify({
+        verified: false,
+        error: 'Transaction not found',
+        hint: 'Transaction may be pending or on a different chain'
+      }, null, 2));
+      return;
+    }
+
+    // Parse transfer events to find payment details
+    const transferTopic = ethers.id('Transfer(address,address,uint256)');
+    const transferLogs = receipt.logs.filter(log => log.topics[0] === transferTopic);
+
+    let paymentDetails = null;
+
+    if (transferLogs.length > 0) {
+      const log = transferLogs[0];
+      const from = ethers.getAddress('0x' + log.topics[1].slice(26));
+      const to = ethers.getAddress('0x' + log.topics[2].slice(26));
+      const amount = ethers.toBigInt(log.data);
+
+      // Try to get token symbol
+      let tokenSymbol = 'UNKNOWN';
+      let decimals = 18;
+
+      try {
+        const tokenContract = new ethers.Contract(log.address, ERC20_ABI, provider);
+        tokenSymbol = await tokenContract.symbol();
+        decimals = await tokenContract.decimals();
+      } catch (e) {
+        // Fallback
+      }
+
+      const formattedAmount = ethers.formatUnits(amount, decimals);
+
+      paymentDetails = {
+        from,
+        to,
+        amount: formattedAmount,
+        token: tokenSymbol,
+        tokenAddress: log.address
+      };
+    }
+
+    const result = {
+      verified: true,
+      txHash: filters.txHash,
+      chain: chainName,
+      blockNumber: receipt.blockNumber,
+      status: receipt.status === 1 ? 'success' : 'failed',
+      gasUsed: receipt.gasUsed.toString(),
+      payment: paymentDetails,
+      explorerUrl: `${chainConfig.explorer}/tx/${filters.txHash}`
+    };
+
+    // If agreement ID provided, update payment status
+    if (filters.agreementId) {
+      const agreementFile = path.join(AGREEMENTS_DIR, `${filters.agreementId}.json`);
+      if (fs.existsSync(agreementFile)) {
+        const agreement = JSON.parse(fs.readFileSync(agreementFile, 'utf8'));
+
+        if (agreement.x402) {
+          agreement.x402.paymentVerified = true;
+          agreement.x402.paymentTxHash = filters.txHash;
+          agreement.x402.paymentVerifiedAt = new Date().toISOString();
+          agreement.x402.paymentDetails = paymentDetails;
+
+          fs.writeFileSync(agreementFile, JSON.stringify(agreement, null, 2));
+          result.agreementUpdated = true;
+          result.agreementId = filters.agreementId;
+        }
+      }
+    }
+
+    // Log to autobiography
+    logAutobiographyEvent('payment_verified', {
+      txHash: filters.txHash,
+      chain: chainName,
+      amount: paymentDetails?.amount,
+      token: paymentDetails?.token,
+      agreementId: filters.agreementId
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+
+  } catch (error) {
+    console.error(JSON.stringify({
+      error: 'Verification failed',
+      message: error.message,
+      hint: 'Check RPC configuration and transaction hash'
+    }));
+    process.exit(1);
+  }
+}
+
+/**
+ * Handle pay send - Send payment on-chain
+ */
+async function handlePaySend(args) {
+  const filters = parseFilters(args);
+
+  if (!filters.to) {
+    console.error(JSON.stringify({
+      error: 'Provide recipient address',
+      usage: 'pay send --to=0x... --amount=10 --token=USDC --chain=base'
+    }));
+    process.exit(1);
+  }
+
+  if (!filters.amount) {
+    console.error(JSON.stringify({
+      error: 'Provide amount',
+      usage: 'pay send --to=0x... --amount=10 --token=USDC'
+    }));
+    process.exit(1);
+  }
+
+  const privateKey = process.env.RECEIPTS_WALLET_PRIVATE_KEY;
+  if (!privateKey) {
+    console.error(JSON.stringify({
+      error: 'RECEIPTS_WALLET_PRIVATE_KEY not set',
+      hint: 'Set environment variable with your wallet private key',
+      warning: 'Never commit private keys to version control!'
+    }));
+    process.exit(1);
+  }
+
+  const chainName = filters.chain || 'base';
+  const chainConfig = CHAIN_CONFIG[chainName];
+
+  if (!chainConfig) {
+    console.error(JSON.stringify({
+      error: 'Invalid chain',
+      chain: chainName,
+      supported: Object.keys(CHAIN_CONFIG)
+    }));
+    process.exit(1);
+  }
+
+  const token = filters.token || 'USDC';
+  const tokenAddress = STABLECOIN_ADDRESSES[chainConfig.chainId]?.[token];
+
+  if (!tokenAddress) {
+    console.error(JSON.stringify({
+      error: 'Token not supported on this chain',
+      token,
+      chain: chainName,
+      supported: Object.keys(STABLECOIN_ADDRESSES[chainConfig.chainId] || {})
+    }));
+    process.exit(1);
+  }
+
+  try {
+    const { ethers } = require('ethers');
+    const provider = new ethers.JsonRpcProvider(chainConfig.rpc);
+    const wallet = new ethers.Wallet(privateKey, provider);
+
+    console.log(JSON.stringify({
+      status: 'preparing',
+      from: wallet.address,
+      to: filters.to,
+      amount: filters.amount,
+      token,
+      chain: chainName
+    }, null, 2));
+
+    const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, wallet);
+
+    // Get decimals
+    const decimals = await tokenContract.decimals();
+    const amount = ethers.parseUnits(filters.amount, decimals);
+
+    // Check balance
+    const balance = await tokenContract.balanceOf(wallet.address);
+    if (balance < amount) {
+      console.error(JSON.stringify({
+        error: 'Insufficient balance',
+        required: filters.amount,
+        available: ethers.formatUnits(balance, decimals),
+        token
+      }));
+      process.exit(1);
+    }
+
+    // Confirm before sending
+    if (!filters.confirm) {
+      console.log(JSON.stringify({
+        status: 'confirmation_required',
+        message: 'Add --confirm to execute this transaction',
+        transaction: {
+          from: wallet.address,
+          to: filters.to,
+          amount: filters.amount,
+          token,
+          chain: chainName,
+          tokenAddress
+        }
+      }, null, 2));
+      return;
+    }
+
+    // Send transaction
+    console.log(JSON.stringify({
+      status: 'sending',
+      message: 'Transaction submitted...'
+    }, null, 2));
+
+    const tx = await tokenContract.transfer(filters.to, amount);
+
+    console.log(JSON.stringify({
+      status: 'pending',
+      txHash: tx.hash,
+      explorerUrl: `${chainConfig.explorer}/tx/${tx.hash}`,
+      message: 'Waiting for confirmation...'
+    }, null, 2));
+
+    const receipt = await tx.wait();
+
+    const result = {
+      status: 'confirmed',
+      txHash: tx.hash,
+      blockNumber: receipt.blockNumber,
+      gasUsed: receipt.gasUsed.toString(),
+      from: wallet.address,
+      to: filters.to,
+      amount: filters.amount,
+      token,
+      chain: chainName,
+      explorerUrl: `${chainConfig.explorer}/tx/${tx.hash}`
+    };
+
+    // If agreement ID provided, update payment status
+    if (filters.agreementId) {
+      const agreementFile = path.join(AGREEMENTS_DIR, `${filters.agreementId}.json`);
+      if (fs.existsSync(agreementFile)) {
+        const agreement = JSON.parse(fs.readFileSync(agreementFile, 'utf8'));
+
+        if (!agreement.x402) {
+          agreement.x402 = {};
+        }
+
+        agreement.x402.paymentTxHash = tx.hash;
+        agreement.x402.paymentSentAt = new Date().toISOString();
+        agreement.x402.paymentFrom = wallet.address;
+        agreement.x402.paymentTo = filters.to;
+        agreement.x402.paymentAmount = filters.amount;
+        agreement.x402.paymentToken = token;
+        agreement.x402.paymentChain = chainName;
+
+        fs.writeFileSync(agreementFile, JSON.stringify(agreement, null, 2));
+        result.agreementUpdated = true;
+        result.agreementId = filters.agreementId;
+      }
+    }
+
+    // Log to autobiography
+    logAutobiographyEvent('payment_sent', {
+      txHash: tx.hash,
+      chain: chainName,
+      amount: filters.amount,
+      token,
+      to: filters.to,
+      agreementId: filters.agreementId
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+
+  } catch (error) {
+    console.error(JSON.stringify({
+      error: 'Payment failed',
+      message: error.message,
+      hint: 'Check wallet balance, gas, and network connection'
+    }));
+    process.exit(1);
+  }
+}
+
+/**
+ * Handle pay status - Check payment status for agreement
+ */
+function handlePayStatus(args) {
+  const filters = parseFilters(args);
+
+  if (!filters.agreementId) {
+    console.error(JSON.stringify({
+      error: 'Provide agreement ID',
+      usage: 'pay status --agreementId=agr_xxx'
+    }));
+    process.exit(1);
+  }
+
+  const agreementFile = path.join(AGREEMENTS_DIR, `${filters.agreementId}.json`);
+  if (!fs.existsSync(agreementFile)) {
+    console.error(JSON.stringify({
+      error: 'Agreement not found',
+      agreementId: filters.agreementId
+    }));
+    process.exit(1);
+  }
+
+  const agreement = JSON.parse(fs.readFileSync(agreementFile, 'utf8'));
+
+  // Check for arbitration too
+  let arbitration = null;
+  if (fs.existsSync(ARBITRATIONS_DIR)) {
+    const arbFiles = fs.readdirSync(ARBITRATIONS_DIR).filter(f => f.endsWith('.json'));
+    for (const file of arbFiles) {
+      const arb = JSON.parse(fs.readFileSync(path.join(ARBITRATIONS_DIR, file), 'utf8'));
+      if (arb.agreementId === filters.agreementId) {
+        arbitration = arb;
+        break;
+      }
+    }
+  }
+
+  const result = {
+    agreementId: filters.agreementId,
+    agreementStatus: agreement.status,
+    paymentTerms: agreement.x402 || null,
+    paymentStatus: 'none'
+  };
+
+  if (agreement.x402) {
+    if (agreement.x402.paymentVerified) {
+      result.paymentStatus = 'verified';
+      result.paymentDetails = {
+        txHash: agreement.x402.paymentTxHash,
+        verifiedAt: agreement.x402.paymentVerifiedAt,
+        details: agreement.x402.paymentDetails
+      };
+    } else if (agreement.x402.paymentTxHash) {
+      result.paymentStatus = 'sent_unverified';
+      result.paymentDetails = {
+        txHash: agreement.x402.paymentTxHash,
+        sentAt: agreement.x402.paymentSentAt
+      };
+    } else {
+      result.paymentStatus = 'required';
+      result.hint = `Use: pay quote --agreementId=${filters.agreementId}`;
+    }
+  }
+
+  if (arbitration) {
+    result.arbitration = {
+      arbitrationId: arbitration.arbitrationId,
+      status: arbitration.status,
+      paymentProof: arbitration.x402?.paymentProof,
+      paymentVerified: arbitration.x402?.paymentVerified
+    };
+  }
+
+  console.log(JSON.stringify(result, null, 2));
+}
+
+/**
+ * Verify x402 payment on-chain (used by arbitration flow)
+ */
+async function verifyX402Payment(txHash, x402Config) {
+  try {
+    const { ethers } = require('ethers');
+
+    const chainId = x402Config.arbitrationChain || 8453;
+    const chainName = getChainNameById(chainId) || 'base';
+    const chainConfig = CHAIN_CONFIG[chainName];
+
+    if (!chainConfig) {
+      return { verified: false, error: 'Chain not supported' };
+    }
+
+    const provider = new ethers.JsonRpcProvider(chainConfig.rpc);
+    const receipt = await provider.getTransactionReceipt(txHash);
+
+    if (!receipt) {
+      return { verified: false, error: 'Transaction not found' };
+    }
+
+    if (receipt.status !== 1) {
+      return { verified: false, error: 'Transaction failed' };
+    }
+
+    // Parse transfer events
+    const transferTopic = ethers.id('Transfer(address,address,uint256)');
+    const transferLogs = receipt.logs.filter(log => log.topics[0] === transferTopic);
+
+    if (transferLogs.length === 0) {
+      return { verified: false, error: 'No transfer found in transaction' };
+    }
+
+    const log = transferLogs[0];
+    const to = ethers.getAddress('0x' + log.topics[2].slice(26));
+    const amount = ethers.toBigInt(log.data);
+
+    // Get token details
+    const tokenContract = new ethers.Contract(log.address, ERC20_ABI, provider);
+    const decimals = await tokenContract.decimals();
+    const formattedAmount = parseFloat(ethers.formatUnits(amount, decimals));
+
+    // Verify amount matches (with 5% tolerance for gas/fees)
+    const expectedAmount = parseFloat(x402Config.arbitrationCost);
+    const tolerance = expectedAmount * 0.05;
+
+    if (formattedAmount < expectedAmount - tolerance) {
+      return {
+        verified: false,
+        error: 'Insufficient payment amount',
+        expected: expectedAmount,
+        received: formattedAmount
+      };
+    }
+
+    // Verify recipient if specified
+    if (x402Config.paymentAddress &&
+        to.toLowerCase() !== x402Config.paymentAddress.toLowerCase()) {
+      return {
+        verified: false,
+        error: 'Payment sent to wrong address',
+        expected: x402Config.paymentAddress,
+        received: to
+      };
+    }
+
+    return {
+      verified: true,
+      txHash,
+      amount: formattedAmount,
+      recipient: to,
+      blockNumber: receipt.blockNumber
+    };
+
+  } catch (error) {
+    return {
+      verified: false,
+      error: error.message
+    };
   }
 }
 

@@ -1,10 +1,10 @@
 ---
 name: receipts-guard
 description: ERC-8004 identity, x402 payments, and arbitration protocol for autonomous agent commerce. The three rails for the machine economy.
-metadata: {"openclaw":{"emoji":"⚖️","requires":{"anyBins":["node"]},"version":"0.8.0-rc"}}
+metadata: {"openclaw":{"emoji":"⚖️","requires":{"anyBins":["node"]},"version":"0.8.0"}}
 ---
 
-# RECEIPTS Guard v0.8.0-rc - Mind-Body Migration
+# RECEIPTS Guard v0.8.0 - Full Identity Layer
 
 > "The rails for the machine economy."
 
@@ -17,7 +17,16 @@ ERC-8004 identity + x402 payments + arbitration protocol. The infrastructure for
 | **Trust** | ERC-8004 Reputation | Arbitration outcomes build reputation |
 | **Payment** | x402 | Paid arbitration, automated settlements |
 
-**Local-first. Chain-anchored. Cloud-deployable. Security-hardened. Identity-layered. Fork-aware. Migration-ready.**
+**Local-first. Chain-anchored. Cloud-deployable. Security-hardened. Identity-layered. Fork-aware. Migration-ready. Credential-enabled.**
+
+## What's New in v0.8.0 (Full Identity Layer)
+
+- **📖 Autobiography Commands** - View, filter, and export autobiographical memory
+- **📝 Manual Event Logging** - Log skills, preferences, milestones
+- **🔒 Privacy Filtering** - Export public, private, or full autobiography
+- **🎓 W3C Credentials** - Verifiable Credentials for agent capabilities
+- **📜 Credential Presentation** - Prove capabilities to counterparties
+- **✍️ Credential Issuance** - Issue credentials to other agents
 
 ## What's New in v0.8.0-rc (Migration)
 
@@ -522,25 +531,195 @@ The singleton lease ensures only one instance of an identity is active at a time
 
 ### Autobiographical Memory (v0.8.0)
 
-The autobiography is a hash-chained log of significant events in the agent's life:
+The autobiography is a hash-chained log of significant events in the agent's life. Every significant action is recorded, signed, and linked to the previous state.
 
-- Identity creation (genesis)
-- Attestations created
-- Agreements accepted/fulfilled
-- Arbitration outcomes
-- Skills acquired
-- Relationships formed
-
-View autobiography:
+#### `identity autobiography` - View Autobiography
 ```bash
-cat ~/.openclaw/receipts/identity/autobiography.json
+# Summary view (default)
+node capture.js identity autobiography
+
+# Full view with all details
+node capture.js identity autobiography --full
+
+# View events only (paginated)
+node capture.js identity autobiography --events --limit=20 --offset=0
+
+# Filter by date
+node capture.js identity autobiography --since=2026-02-01
+
+# Filter by event type
+node capture.js identity autobiography --type=agreement_accepted
 ```
 
-The autobiography enables:
-- **Reputation scoring** from event history
-- **Skill tracking** for capability discovery
-- **Relationship graph** for trust networks
-- **Privacy-filtered export** for sharing
+#### `identity autobiography export` - Privacy-Filtered Export
+```bash
+# Export public events only (for sharing)
+node capture.js identity autobiography --export --filter=public
+
+# Export with private events (skills, preferences)
+node capture.js identity autobiography --export --filter=private
+
+# Export everything (for backup)
+node capture.js identity autobiography --export --filter=full --output=backup.json
+```
+
+| Filter Level | Includes |
+|--------------|----------|
+| `public` | Genesis, agreements, arbitrations, key rotations, migrations |
+| `private` | + Skills, preferences, relationships |
+| `full` | Everything including internal events |
+
+#### `identity autobiography rebuild` - Rebuild State
+```bash
+# Recompute currentState from event log (if corrupted)
+node capture.js identity autobiography --rebuild
+```
+
+#### `identity log` - Manual Event Logging
+```bash
+# Log skill acquisition
+node capture.js identity log --type=skill_acquired \
+  --data='{"skill":"rust","proficiency":0.6,"source":"self_study"}'
+
+# Log preference update
+node capture.js identity log --type=preference_updated \
+  --data='{"preference":"riskTolerance","value":0.3}'
+
+# Log relationship
+node capture.js identity log --type=relationship_formed \
+  --data='{"counterparty":"did:agent:acme:partner","relationshipType":"trusted_vendor"}'
+
+# Log milestone
+node capture.js identity log --type=milestone \
+  --data='{"title":"First commercial audit completed"}'
+
+# Log note
+node capture.js identity log --type=note \
+  --data='{"content":"Learned to handle edge cases in x402 payments"}'
+```
+
+**Supported Event Types:**
+| Type | Required Fields | Description |
+|------|-----------------|-------------|
+| `skill_acquired` | skill | New capability learned |
+| `preference_updated` | preference, value | Config/risk tolerance change |
+| `relationship_formed` | counterparty, relationshipType | Trust relationship |
+| `note` | content | General observation |
+| `milestone` | title | Significant achievement |
+| `external_event` | description | External event affecting agent |
+
+---
+
+### Credentials (v0.8.0)
+
+W3C Verifiable Credentials enable agents to prove capabilities, certifications, and compliance.
+
+#### `credentials list` - List Credentials
+```bash
+# List all credentials
+node capture.js credentials list
+
+# Filter by type
+node capture.js credentials list --type=AgentCapability
+
+# Only valid (not expired, not revoked)
+node capture.js credentials list --valid-only
+```
+
+#### `credentials import` - Import Credential
+```bash
+# Import from file
+node capture.js credentials import --file=capability_credential.json
+
+# Import from JSON
+node capture.js credentials import --json='{"@context":["https://www.w3.org/2018/credentials/v1"],"type":["VerifiableCredential","AgentCapabilityCredential"],"issuer":"did:agent:certifier:authority","credentialSubject":{"id":"did:agent:remaster_io:receipts-guard","capability":"solidity_audit"}}'
+```
+
+#### `credentials verify` - Verify Credential
+```bash
+# Verify by ID
+node capture.js credentials verify --id=vc_abc123
+
+# Verify file
+node capture.js credentials verify --file=credential.json
+
+# Full output including credential
+node capture.js credentials verify --id=vc_abc123 --full
+```
+
+Verification checks:
+- Has valid W3C context
+- Has VerifiableCredential type
+- Has issuer and subject
+- Not expired
+- Not revoked
+- Signature valid (if proof present)
+
+#### `credentials present` - Create Verifiable Presentation
+```bash
+# Present credentials to counterparty
+node capture.js credentials present \
+  --ids=vc_capability,vc_insurance \
+  --to=did:agent:acme:contractor \
+  --output=presentation.json
+
+# With challenge (for authentication)
+node capture.js credentials present \
+  --ids=vc_capability \
+  --to=did:agent:acme:contractor \
+  --challenge=abc123xyz
+```
+
+The presentation is signed by your DID and can only be used by the specified recipient.
+
+#### `credentials issue` - Issue Credential
+```bash
+# Issue capability credential
+node capture.js credentials issue \
+  --type=AgentCapability \
+  --subject=did:agent:partner:agent \
+  --claims='{"capability":"code_review","level":"certified"}' \
+  --expires=2027-02-10
+
+# Issue with no expiry
+node capture.js credentials issue \
+  --type=Registration \
+  --subject=did:agent:partner:agent \
+  --claims='{"registrationNumber":"AI-2026-001234"}' \
+  --no-expiry
+```
+
+**Standard Credential Types:**
+| Type | Use Case |
+|------|----------|
+| `AgentCapabilityCredential` | Skills and certifications |
+| `InsuranceCredential` | Liability coverage |
+| `ComplianceCredential` | Regulatory compliance (ISO, SOC2) |
+| `RegistrationCredential` | Legal registration |
+| `ReputationCredential` | Trust attestations |
+
+#### `credentials revoke` - Revoke Credential
+```bash
+node capture.js credentials revoke --id=vc_abc123 --reason="Subject no longer meets requirements"
+```
+
+Only the issuer can revoke credentials they issued.
+
+#### Credentials in Agreements
+
+Proposals can require specific credentials:
+```bash
+node capture.js propose "Security audit" "client" \
+  --arbiter="arbiter-prime" \
+  --require-credential=AgentCapabilityCredential:solidity_audit \
+  --require-credential=InsuranceCredential:100000
+```
+
+When accepting, present the required credentials:
+```bash
+node capture.js accept --proposalId=prop_xxx \
+  --present-credentials=vc_capability,vc_insurance
+```
 
 ---
 
@@ -564,9 +743,9 @@ export RECEIPTS_WALLET_PRIVATE_KEY=0x... # Never commit this!
 
 ---
 
-### x402 Payment Integration (v0.7.0)
+### x402 Payment Integration (v0.8.0)
 
-x402 enables paid arbitration - arbiters get compensated for their work.
+x402 enables paid arbitration - arbiters get compensated for their work. Full on-chain verification ensures payments are real.
 
 #### Proposal with Payment Terms
 ```bash
@@ -578,16 +757,88 @@ node capture.js propose "Service agreement" "counterparty" \
   --payment-address="0x..." # Arbiter's address
 ```
 
+#### `pay quote` - Get Payment Requirements
+```bash
+node capture.js pay quote --agreementId=agr_xxx
+```
+
+Shows:
+- Payment amount and token required
+- Chain to pay on
+- Recipient address
+- Token contract address
+- Step-by-step instructions
+
+#### `pay send` - Send Payment On-Chain
+```bash
+# Preview transaction (no --confirm)
+node capture.js pay send \
+  --to=0xArbiterAddress \
+  --amount=10 \
+  --token=USDC \
+  --chain=base \
+  --agreementId=agr_xxx
+
+# Execute transaction (with --confirm)
+node capture.js pay send \
+  --to=0xArbiterAddress \
+  --amount=10 \
+  --token=USDC \
+  --chain=base \
+  --agreementId=agr_xxx \
+  --confirm
+```
+
+**Requirements:**
+- Set `RECEIPTS_WALLET_PRIVATE_KEY` environment variable
+- Wallet must have sufficient token balance
+- Wallet must have ETH for gas
+
+#### `pay verify` - Verify Payment On-Chain
+```bash
+node capture.js pay verify \
+  --txHash=0x... \
+  --chain=base \
+  --agreementId=agr_xxx
+```
+
+Verifies:
+- Transaction exists and succeeded
+- Transfer event found
+- Amount matches requirements
+- Recipient matches expected address
+
+#### `pay status` - Check Payment Status
+```bash
+node capture.js pay status --agreementId=agr_xxx
+```
+
+Shows:
+- Payment terms from agreement
+- Current payment status (none/sent/verified)
+- Transaction details if payment made
+- Related arbitration status
+
 #### Arbitration with Payment Proof
 ```bash
 # Without payment proof (fails if x402 required)
 node capture.js arbitrate --agreementId=agr_xxx --reason="non_delivery"
 # Error: Payment required: 10 USDC
 
-# With payment proof
+# With payment proof (automatically verified on-chain)
 node capture.js arbitrate --agreementId=agr_xxx --reason="non_delivery" \
-  --evidence="..." --payment-proof="0x123..."
+  --evidence="..." --payment-proof="0xTransactionHash..."
 ```
+
+The arbitration command now verifies the payment on-chain before accepting.
+
+#### Supported Chains & Tokens
+
+| Chain | ChainId | Supported Tokens |
+|-------|---------|------------------|
+| Ethereum | 1 | USDC, USDT, DAI |
+| Base | 8453 | USDC, USDbC, DAI |
+| Sepolia | 11155111 | USDC, DAI (testnet) |
 
 **x402 Schema:**
 ```json
@@ -598,7 +849,10 @@ node capture.js arbitrate --agreementId=agr_xxx --reason="non_delivery" \
     "arbitrationChain": 8453,
     "paymentAddress": "0x...",
     "paymentProtocol": "x402",
-    "version": "1.0"
+    "version": "1.0",
+    "paymentTxHash": "0x...",
+    "paymentVerified": true,
+    "paymentVerifiedAt": "2026-02-10T..."
   }
 }
 ```
