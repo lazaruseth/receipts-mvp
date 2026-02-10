@@ -1,6 +1,6 @@
 {
   "name": "receipts-guard",
-  "version": "0.8.0-beta",
+  "version": "0.8.0-rc",
   "description": "Agent commerce infrastructure with ERC-8004 identity, x402 payments, and arbitration protocol",
   "main": "capture.js",
   "bin": {

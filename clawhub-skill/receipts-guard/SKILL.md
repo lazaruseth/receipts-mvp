@@ -1,10 +1,10 @@
 ---
 name: receipts-guard
 description: ERC-8004 identity, x402 payments, and arbitration protocol for autonomous agent commerce. The three rails for the machine economy.
-metadata: {"openclaw":{"emoji":"⚖️","requires":{"anyBins":["node"]},"version":"0.8.0-beta"}}
+metadata: {"openclaw":{"emoji":"⚖️","requires":{"anyBins":["node"]},"version":"0.8.0-rc"}}
 ---
 
-# RECEIPTS Guard v0.8.0-beta - Fork Handling
+# RECEIPTS Guard v0.8.0-rc - Mind-Body Migration
 
 > "The rails for the machine economy."
 
@@ -17,7 +17,33 @@ ERC-8004 identity + x402 payments + arbitration protocol. The infrastructure for
 | **Trust** | ERC-8004 Reputation | Arbitration outcomes build reputation |
 | **Payment** | x402 | Paid arbitration, automated settlements |
 
-**Local-first. Chain-anchored. Cloud-deployable. Security-hardened. Identity-layered. Fork-aware.**
+**Local-first. Chain-anchored. Cloud-deployable. Security-hardened. Identity-layered. Fork-aware. Migration-ready.**
+
+## What's New in v0.8.0-rc (Migration)
+
+- **📦 State Export** - Bundle complete identity state for transfer
+- **📥 State Import** - Restore identity on new host
+- **🔒 Singleton Lease** - Exclusive access control in singleton mode
+- **✅ Migration Verification** - Verify successful transfers
+
+### Migration Protocol
+```
+Source Host                    Destination Host
+    │                               │
+    │ 1. Export state bundle        │
+    │ 2. Check/release lease        │
+    │                               │
+    │ ────── transfer bundle ─────► │
+    │                               │
+    │                    3. Import state
+    │                    4. Acquire lease
+    │                    5. Create attestation
+    │                               │
+    │ ◄─────── verify ─────────────│
+    │                               │
+    ▼                               ▼
+ [dormant]                      [active]
+```
 
 ## What's New in v0.8.0-beta (Fork Handling)
 
@@ -411,6 +437,86 @@ When a fork is created:
 | `forkInheritsReputation: none` | Fork starts with 0 reputation |
 | `forkInheritsReputation: partial` | Fork gets 50% of parent reputation |
 | `forkInheritsReputation: full` | Fork inherits full reputation |
+
+---
+
+### Migration (v0.8.0-rc)
+
+Move your agent identity between hosts while maintaining continuity.
+
+#### `identity migrate export` - Export State Bundle
+```bash
+# Export complete identity state
+node capture.js identity migrate export
+
+# Export with specific destination
+node capture.js identity migrate export --destination=did:body:new-server
+```
+
+The export creates a migration bundle containing:
+- DID document and private key (handle securely!)
+- Key history and lineage
+- All proposals, agreements, and arbitrations
+- Recent attestations
+- Autobiography and fork policy
+
+**Warning:** The bundle contains sensitive private key material. Transfer securely.
+
+#### `identity migrate import` - Import State Bundle
+```bash
+# Import on destination host
+node capture.js identity migrate import --bundle=/path/to/mig_xxx.json
+
+# Force import (overwrite existing identity - DANGEROUS)
+node capture.js identity migrate import --bundle=/path/to/mig_xxx.json --force
+```
+
+The import:
+- Restores complete identity state
+- Adds migration event to lineage
+- Acquires singleton lease (if singleton mode)
+- Preserves all agreements and arbitrations
+
+#### `identity migrate verify` - Verify Migration
+```bash
+# Verify on destination host
+node capture.js identity migrate verify --migrationId=mig_xxx
+```
+
+Verifies:
+- Identity restored correctly
+- Destination signature exists
+- Lineage updated with migration event
+
+#### `identity migrate status` - Migration History
+```bash
+node capture.js identity migrate status
+```
+
+Shows all migrations (exports and imports) on this host.
+
+#### `identity lease` - Singleton Lease Management
+```bash
+# View lease status
+node capture.js identity lease
+
+# Acquire lease
+node capture.js identity lease --acquire
+
+# Renew lease
+node capture.js identity lease --renew
+
+# Release lease (before migration)
+node capture.js identity lease --release
+```
+
+The singleton lease ensures only one instance of an identity is active at a time.
+
+| Lease State | Meaning |
+|-------------|---------|
+| `no_lease` | No lease required or none acquired |
+| `active` | This host holds the exclusive lease |
+| `EXPIRED` | Lease expired, can be acquired by another host |
 
 ---
 

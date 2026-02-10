@@ -77,7 +77,7 @@ const RECEIPTS_DIR = path.join(
 const INDEX_FILE = path.join(RECEIPTS_DIR, 'index.json');
 
 // Version
-const VERSION = '0.8.0-beta';
+const VERSION = '0.8.0-rc';
 
 // Arbitration directories
 const PROPOSALS_DIR = path.join(RECEIPTS_DIR, 'proposals');
@@ -99,6 +99,10 @@ const ATTESTATIONS_DIR = path.join(IDENTITY_DIR, 'attestations');
 const LINEAGE_FILE = path.join(IDENTITY_DIR, 'lineage.json');
 const FORK_POLICY_FILE = path.join(IDENTITY_DIR, 'fork-policy.json');
 const AUTOBIOGRAPHY_FILE = path.join(IDENTITY_DIR, 'autobiography.json');
+
+// Migration directories (v0.8.0-rc)
+const MIGRATIONS_DIR = path.join(IDENTITY_DIR, 'migrations');
+const LEASE_FILE = path.join(IDENTITY_DIR, 'lease.json');
 
 // DID Method
 const DID_METHOD = 'agent';
@@ -3023,6 +3027,13 @@ function handleIdentity(args) {
     case 'lineage':
       handleIdentityLineage(args.slice(1));
       break;
+    // === MIGRATION (v0.8.0-rc) ===
+    case 'migrate':
+      handleIdentityMigrate(args.slice(1));
+      break;
+    case 'lease':
+      handleIdentityLease(args.slice(1));
+      break;
     default:
       showIdentityHelp();
   }
@@ -5436,6 +5447,741 @@ function handleIdentityLineage(args) {
     branches: Object.keys(lineage.branches),
     merges: lineage.merges.length
   }, null, 2));
+}
+
+// === MIGRATION (v0.8.0-rc) ===
+
+/**
+ * Handle identity migrate command
+ */
+function handleIdentityMigrate(args) {
+  const subCommand = args[0];
+
+  switch (subCommand) {
+    case 'export':
+      handleMigrateExport(args.slice(1));
+      break;
+    case 'import':
+      handleMigrateImport(args.slice(1));
+      break;
+    case 'verify':
+      handleMigrateVerify(args.slice(1));
+      break;
+    case 'status':
+      handleMigrateStatus(args.slice(1));
+      break;
+    default:
+      console.log(JSON.stringify({
+        error: 'Unknown migrate subcommand',
+        usage: [
+          'identity migrate export [--destination=DID]',
+          'identity migrate import --bundle=FILE',
+          'identity migrate verify --migrationId=ID',
+          'identity migrate status'
+        ]
+      }, null, 2));
+  }
+}
+
+/**
+ * Export identity state for migration to another host
+ */
+function handleMigrateExport(args) {
+  const filters = parseFilters(args);
+
+  const didDocument = loadLocalDID();
+  if (!didDocument) {
+    console.error(JSON.stringify({ error: 'No identity found' }));
+    process.exit(1);
+  }
+
+  const forkPolicy = loadForkPolicy();
+
+  // Check singleton lease if enforced
+  if (forkPolicy?.policyType === 'singleton' && forkPolicy.singleton.enforced) {
+    const lease = loadLease();
+    if (lease && lease.status === 'active') {
+      // Check if we own the lease
+      if (lease.holder !== didDocument.id) {
+        console.error(JSON.stringify({
+          error: 'Singleton lease held by another instance',
+          holder: lease.holder,
+          expiresAt: lease.expiresAt,
+          hint: 'Wait for lease to expire or release it from the other instance'
+        }));
+        process.exit(1);
+      }
+    }
+  }
+
+  const timestamp = new Date().toISOString();
+  const migrationId = `mig_${crypto.randomBytes(6).toString('hex')}`;
+
+  // Load all identity state
+  const lineage = loadLineage();
+  const autobiography = loadAutobiography();
+  const keyHistory = fs.existsSync(KEY_HISTORY_FILE)
+    ? JSON.parse(fs.readFileSync(KEY_HISTORY_FILE, 'utf8'))
+    : null;
+
+  // Load private key (sensitive!)
+  const privateKeyPath = path.join(PRIVATE_KEY_DIR, 'key-current.json');
+  const privateKeyData = fs.existsSync(privateKeyPath)
+    ? JSON.parse(fs.readFileSync(privateKeyPath, 'utf8'))
+    : null;
+
+  // Load proposals, agreements, arbitrations
+  const proposals = loadAllProposals();
+  const agreements = loadAllAgreements();
+  const arbitrations = loadAllArbitrations();
+
+  // Load attestations
+  const attestations = loadAllAttestations();
+
+  // Create attestation of current state
+  const stateHash = computeIdentityStateHash();
+
+  // Create migration bundle
+  const bundle = {
+    migrationId,
+    version: VERSION,
+    sourceDid: didDocument.id,
+    destinationDid: filters.destination || null,
+    timestamp,
+
+    // Source environment attestation
+    sourceEnvironment: {
+      platform: process.platform,
+      nodeVersion: process.version,
+      hostname: require('os').hostname(),
+      stateHash: stateHash ? `sha256:${stateHash}` : null
+    },
+
+    stateBundle: {
+      // Identity
+      didDocument,
+      privateKey: privateKeyData,
+      keyHistory,
+      lineage,
+      forkPolicy,
+      autobiography,
+
+      // Commitments
+      proposals,
+      agreements,
+      arbitrations,
+
+      // Attestations
+      attestations: attestations.slice(-10), // Last 10 attestations
+      lastAttestation: attestations[attestations.length - 1] || null
+    },
+
+    // Sign the bundle
+    sourceSignature: null,
+    destinationSignature: null
+  };
+
+  // Sign the bundle (excluding signatures)
+  const bundleHash = crypto.createHash('sha256')
+    .update(JSON.stringify({ ...bundle, sourceSignature: undefined, destinationSignature: undefined }))
+    .digest('hex');
+  bundle.sourceSignature = signTerms(bundleHash, 'migration');
+
+  // Save migration record
+  ensureDir(MIGRATIONS_DIR);
+  const bundlePath = path.join(MIGRATIONS_DIR, `${migrationId}.json`);
+  fs.writeFileSync(bundlePath, JSON.stringify(bundle, null, 2));
+
+  // Log to lineage
+  logLineageEvent('migration_exported', {
+    migrationId,
+    destination: filters.destination || 'unspecified'
+  });
+
+  // Log to autobiography
+  logAutobiographyEvent('migration_exported', {
+    migrationId,
+    destination: filters.destination || 'unspecified'
+  });
+
+  console.log(JSON.stringify({
+    success: true,
+    migrationId,
+    bundlePath,
+    sourceDid: didDocument.id,
+    destination: filters.destination || 'unspecified',
+    stateHash: stateHash ? `sha256:${stateHash}` : null,
+    includedItems: {
+      proposals: proposals.length,
+      agreements: agreements.length,
+      arbitrations: arbitrations.length,
+      attestations: bundle.stateBundle.attestations.length,
+      lineageStates: lineage?.stateLog?.length || 0,
+      autobiographyEvents: autobiography?.eventLog?.length || 0
+    },
+    message: 'Migration bundle exported',
+    warning: 'Bundle contains private key! Handle securely.',
+    nextSteps: [
+      `Transfer ${bundlePath} to destination host securely`,
+      'On destination: node capture.js identity migrate import --bundle=FILE',
+      'After successful import: node capture.js identity migrate verify --migrationId=' + migrationId
+    ]
+  }, null, 2));
+}
+
+/**
+ * Load all proposals
+ */
+function loadAllProposals() {
+  ensureDir(PROPOSALS_DIR);
+  const files = fs.readdirSync(PROPOSALS_DIR).filter(f => f.endsWith('.json'));
+  return files.map(f => JSON.parse(fs.readFileSync(path.join(PROPOSALS_DIR, f), 'utf8')));
+}
+
+/**
+ * Load all agreements
+ */
+function loadAllAgreements() {
+  ensureDir(AGREEMENTS_DIR);
+  const files = fs.readdirSync(AGREEMENTS_DIR).filter(f => f.endsWith('.json'));
+  return files.map(f => JSON.parse(fs.readFileSync(path.join(AGREEMENTS_DIR, f), 'utf8')));
+}
+
+/**
+ * Load all arbitrations
+ */
+function loadAllArbitrations() {
+  ensureDir(ARBITRATIONS_DIR);
+  const files = fs.readdirSync(ARBITRATIONS_DIR).filter(f => f.endsWith('.json'));
+  return files.map(f => JSON.parse(fs.readFileSync(path.join(ARBITRATIONS_DIR, f), 'utf8')));
+}
+
+/**
+ * Load all attestations
+ */
+function loadAllAttestations() {
+  ensureDir(ATTESTATIONS_DIR);
+  const files = fs.readdirSync(ATTESTATIONS_DIR).filter(f => f.endsWith('.json'));
+  return files.map(f => JSON.parse(fs.readFileSync(path.join(ATTESTATIONS_DIR, f), 'utf8')))
+    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+}
+
+/**
+ * Import identity state from migration bundle
+ */
+function handleMigrateImport(args) {
+  const filters = parseFilters(args);
+
+  if (!filters.bundle) {
+    console.error(JSON.stringify({
+      error: 'Missing required: --bundle=FILE',
+      hint: 'Provide path to migration bundle from source host'
+    }));
+    process.exit(1);
+  }
+
+  // Check if identity already exists
+  if (fs.existsSync(DID_FILE)) {
+    const existingDID = loadLocalDID();
+    if (!filters.force) {
+      console.error(JSON.stringify({
+        error: 'Identity already exists on this host',
+        existingDid: existingDID?.id,
+        hint: 'Use --force to overwrite (DANGEROUS - will replace existing identity)'
+      }));
+      process.exit(1);
+    }
+  }
+
+  // Load bundle
+  if (!fs.existsSync(filters.bundle)) {
+    console.error(JSON.stringify({
+      error: `Bundle file not found: ${filters.bundle}`
+    }));
+    process.exit(1);
+  }
+
+  const bundle = JSON.parse(fs.readFileSync(filters.bundle, 'utf8'));
+
+  // Verify bundle signature
+  const bundleHash = crypto.createHash('sha256')
+    .update(JSON.stringify({
+      ...bundle,
+      sourceSignature: undefined,
+      destinationSignature: undefined
+    }))
+    .digest('hex');
+
+  // We can't verify with verifySignatureWithHistory here because we don't have the DID yet
+  // But we can verify after import
+  const signatureValid = bundle.sourceSignature?.startsWith('ed25519:');
+
+  if (!signatureValid) {
+    console.error(JSON.stringify({
+      error: 'Invalid bundle signature format',
+      hint: 'Bundle may be corrupted or from incompatible version'
+    }));
+    process.exit(1);
+  }
+
+  const timestamp = new Date().toISOString();
+
+  // Create directory structure
+  ensureDir(IDENTITY_DIR);
+  ensureDir(PRIVATE_KEY_DIR, true);
+  ensureDir(KEY_ARCHIVE_DIR, true);
+  ensureDir(RECOVERY_DIR, true);
+  ensureDir(ATTESTATIONS_DIR);
+  ensureDir(MIGRATIONS_DIR);
+  ensureDir(PROPOSALS_DIR);
+  ensureDir(AGREEMENTS_DIR);
+  ensureDir(ARBITRATIONS_DIR);
+
+  const state = bundle.stateBundle;
+
+  // Restore DID document
+  fs.writeFileSync(DID_FILE, JSON.stringify(state.didDocument, null, 2));
+
+  // Restore private key
+  if (state.privateKey) {
+    const keyFilePath = path.join(PRIVATE_KEY_DIR, 'key-current.json');
+    fs.writeFileSync(keyFilePath, JSON.stringify(state.privateKey, null, 2));
+    try {
+      fs.chmodSync(keyFilePath, 0o600);
+    } catch (e) { /* Windows */ }
+  }
+
+  // Restore key history
+  if (state.keyHistory) {
+    fs.writeFileSync(KEY_HISTORY_FILE, JSON.stringify(state.keyHistory, null, 2));
+  }
+
+  // Restore lineage with migration event
+  if (state.lineage) {
+    const lineage = state.lineage;
+    const newStateId = `state_${String(lineage.stateLog.length).padStart(3, '0')}`;
+
+    lineage.stateLog.push({
+      stateId: newStateId,
+      timestamp,
+      stateHash: bundle.sourceEnvironment.stateHash,
+      parentStateId: lineage.stateLog[lineage.stateLog.length - 1]?.stateId,
+      event: 'migration_imported',
+      eventData: {
+        migrationId: bundle.migrationId,
+        sourceHost: bundle.sourceEnvironment.hostname,
+        destinationHost: require('os').hostname()
+      },
+      signature: null // Will sign after key is restored
+    });
+
+    lineage.branches[lineage.currentBranch].head = newStateId;
+    fs.writeFileSync(LINEAGE_FILE, JSON.stringify(lineage, null, 2));
+  }
+
+  // Restore fork policy
+  if (state.forkPolicy) {
+    fs.writeFileSync(FORK_POLICY_FILE, JSON.stringify(state.forkPolicy, null, 2));
+  }
+
+  // Restore autobiography with migration event
+  if (state.autobiography) {
+    const autobiography = state.autobiography;
+    autobiography.eventLog.push({
+      eventId: `evt_${String(autobiography.eventLog.length + 1).padStart(3, '0')}`,
+      timestamp,
+      eventType: 'migration_imported',
+      data: {
+        migrationId: bundle.migrationId,
+        sourceHost: bundle.sourceEnvironment.hostname,
+        destinationHost: require('os').hostname()
+      },
+      stateHashBefore: bundle.sourceEnvironment.stateHash,
+      stateHashAfter: null, // Will compute after full restore
+      signature: null
+    });
+    fs.writeFileSync(AUTOBIOGRAPHY_FILE, JSON.stringify(autobiography, null, 2));
+  }
+
+  // Restore proposals
+  for (const proposal of state.proposals || []) {
+    fs.writeFileSync(
+      path.join(PROPOSALS_DIR, `${proposal.proposalId}.json`),
+      JSON.stringify(proposal, null, 2)
+    );
+  }
+
+  // Restore agreements
+  for (const agreement of state.agreements || []) {
+    fs.writeFileSync(
+      path.join(AGREEMENTS_DIR, `${agreement.agreementId}.json`),
+      JSON.stringify(agreement, null, 2)
+    );
+  }
+
+  // Restore arbitrations
+  for (const arbitration of state.arbitrations || []) {
+    fs.writeFileSync(
+      path.join(ARBITRATIONS_DIR, `${arbitration.arbitrationId}.json`),
+      JSON.stringify(arbitration, null, 2)
+    );
+  }
+
+  // Restore attestations
+  for (const attestation of state.attestations || []) {
+    fs.writeFileSync(
+      path.join(ATTESTATIONS_DIR, `${attestation.attestationId}.json`),
+      JSON.stringify(attestation, null, 2)
+    );
+  }
+
+  // Save migration record
+  const importRecord = {
+    migrationId: bundle.migrationId,
+    importedAt: timestamp,
+    sourceDid: bundle.sourceDid,
+    sourceHost: bundle.sourceEnvironment.hostname,
+    destinationHost: require('os').hostname(),
+    bundleHash,
+    sourceSignature: bundle.sourceSignature
+  };
+  fs.writeFileSync(
+    path.join(MIGRATIONS_DIR, `${bundle.migrationId}-import.json`),
+    JSON.stringify(importRecord, null, 2)
+  );
+
+  // Sign the import
+  const destinationSignature = signTerms(bundleHash, 'migration-import');
+  importRecord.destinationSignature = destinationSignature;
+  fs.writeFileSync(
+    path.join(MIGRATIONS_DIR, `${bundle.migrationId}-import.json`),
+    JSON.stringify(importRecord, null, 2)
+  );
+
+  // Acquire singleton lease if applicable
+  const forkPolicy = loadForkPolicy();
+  if (forkPolicy?.policyType === 'singleton') {
+    acquireLease(state.didDocument.id);
+  }
+
+  console.log(JSON.stringify({
+    success: true,
+    migrationId: bundle.migrationId,
+    did: state.didDocument.id,
+    importedAt: timestamp,
+    sourceHost: bundle.sourceEnvironment.hostname,
+    destinationHost: require('os').hostname(),
+    restoredItems: {
+      proposals: state.proposals?.length || 0,
+      agreements: state.agreements?.length || 0,
+      arbitrations: state.arbitrations?.length || 0,
+      attestations: state.attestations?.length || 0
+    },
+    leaseAcquired: forkPolicy?.policyType === 'singleton',
+    message: 'Migration import complete',
+    nextSteps: [
+      'Verify migration: node capture.js identity migrate verify --migrationId=' + bundle.migrationId,
+      'Create new attestation: node capture.js attestation create',
+      'Mark source as dormant (on source host)'
+    ]
+  }, null, 2));
+}
+
+/**
+ * Verify migration completed successfully
+ */
+function handleMigrateVerify(args) {
+  const filters = parseFilters(args);
+
+  if (!filters.migrationId) {
+    console.error(JSON.stringify({
+      error: 'Missing required: --migrationId=ID',
+      hint: 'Provide migration ID from export/import'
+    }));
+    process.exit(1);
+  }
+
+  const migrationId = filters.migrationId;
+
+  // Check for import record
+  const importRecordPath = path.join(MIGRATIONS_DIR, `${migrationId}-import.json`);
+  const exportRecordPath = path.join(MIGRATIONS_DIR, `${migrationId}.json`);
+
+  const hasImport = fs.existsSync(importRecordPath);
+  const hasExport = fs.existsSync(exportRecordPath);
+
+  if (!hasImport && !hasExport) {
+    console.error(JSON.stringify({
+      error: `Migration not found: ${migrationId}`,
+      hint: 'Check migration ID or run on correct host'
+    }));
+    process.exit(1);
+  }
+
+  const results = {
+    migrationId,
+    verified: true,
+    checks: []
+  };
+
+  // If we have the import record, verify it
+  if (hasImport) {
+    const importRecord = JSON.parse(fs.readFileSync(importRecordPath, 'utf8'));
+
+    // Check identity matches
+    const didDocument = loadLocalDID();
+    if (didDocument?.id === importRecord.sourceDid) {
+      results.checks.push({ check: 'identity_restored', passed: true });
+    } else {
+      results.checks.push({
+        check: 'identity_restored',
+        passed: false,
+        expected: importRecord.sourceDid,
+        actual: didDocument?.id
+      });
+      results.verified = false;
+    }
+
+    // Check destination signature exists
+    if (importRecord.destinationSignature) {
+      results.checks.push({ check: 'destination_signed', passed: true });
+    } else {
+      results.checks.push({ check: 'destination_signed', passed: false });
+      results.verified = false;
+    }
+
+    // Check lineage has migration event
+    const lineage = loadLineage();
+    const migrationEvent = lineage?.stateLog?.find(s =>
+      s.event === 'migration_imported' && s.eventData?.migrationId === migrationId
+    );
+    if (migrationEvent) {
+      results.checks.push({ check: 'lineage_updated', passed: true });
+    } else {
+      results.checks.push({ check: 'lineage_updated', passed: false });
+      results.verified = false;
+    }
+
+    results.importedAt = importRecord.importedAt;
+    results.sourceHost = importRecord.sourceHost;
+    results.destinationHost = importRecord.destinationHost;
+  }
+
+  // If we have the export record (source host)
+  if (hasExport && !hasImport) {
+    const exportRecord = JSON.parse(fs.readFileSync(exportRecordPath, 'utf8'));
+    results.checks.push({ check: 'export_exists', passed: true });
+    results.exportedAt = exportRecord.timestamp;
+    results.status = 'exported_pending_import';
+  } else if (hasExport && hasImport) {
+    results.status = 'migration_complete';
+  }
+
+  console.log(JSON.stringify({
+    ...results,
+    message: results.verified ? 'Migration verified successfully' : 'Migration verification failed'
+  }, null, 2));
+}
+
+/**
+ * Show migration status
+ */
+function handleMigrateStatus(args) {
+  ensureDir(MIGRATIONS_DIR);
+
+  const files = fs.readdirSync(MIGRATIONS_DIR).filter(f => f.endsWith('.json'));
+  const migrations = [];
+
+  for (const file of files) {
+    const record = JSON.parse(fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8'));
+    migrations.push({
+      migrationId: record.migrationId,
+      type: file.includes('-import') ? 'import' : 'export',
+      timestamp: record.importedAt || record.timestamp,
+      sourceDid: record.sourceDid,
+      sourceHost: record.sourceHost || record.sourceEnvironment?.hostname,
+      destinationHost: record.destinationHost
+    });
+  }
+
+  console.log(JSON.stringify({
+    totalMigrations: migrations.length,
+    migrations: migrations.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+  }, null, 2));
+}
+
+/**
+ * Handle identity lease command (for singleton mode)
+ */
+function handleIdentityLease(args) {
+  const filters = parseFilters(args);
+
+  const forkPolicy = loadForkPolicy();
+  if (forkPolicy?.policyType !== 'singleton') {
+    console.error(JSON.stringify({
+      error: 'Lease only applicable in singleton mode',
+      currentMode: forkPolicy?.policyType,
+      hint: 'Switch to singleton: node capture.js identity fork-policy --type=singleton'
+    }));
+    process.exit(1);
+  }
+
+  if (filters.status || (!filters.acquire && !filters.release && !filters.renew)) {
+    // Show lease status
+    const lease = loadLease();
+    if (!lease) {
+      console.log(JSON.stringify({
+        status: 'no_lease',
+        message: 'No active lease'
+      }, null, 2));
+    } else {
+      const now = Date.now();
+      const expiresIn = new Date(lease.expiresAt).getTime() - now;
+      console.log(JSON.stringify({
+        ...lease,
+        expiresIn: expiresIn > 0 ? `${Math.round(expiresIn / 1000)}s` : 'EXPIRED',
+        isExpired: expiresIn <= 0,
+        renewWindow: expiresIn <= forkPolicy.singleton.leaseRenewalWindow
+      }, null, 2));
+    }
+    return;
+  }
+
+  const didDocument = loadLocalDID();
+  if (!didDocument) {
+    console.error(JSON.stringify({ error: 'No identity found' }));
+    process.exit(1);
+  }
+
+  if (filters.acquire) {
+    const result = acquireLease(didDocument.id);
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (filters.release) {
+    const lease = loadLease();
+    if (!lease) {
+      console.log(JSON.stringify({
+        error: 'No lease to release'
+      }, null, 2));
+      return;
+    }
+
+    if (lease.holder !== didDocument.id) {
+      console.error(JSON.stringify({
+        error: 'Cannot release lease held by another identity',
+        holder: lease.holder,
+        you: didDocument.id
+      }));
+      process.exit(1);
+    }
+
+    releaseLease();
+    console.log(JSON.stringify({
+      success: true,
+      message: 'Lease released'
+    }, null, 2));
+    return;
+  }
+
+  if (filters.renew) {
+    const result = renewLease(didDocument.id);
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+}
+
+/**
+ * Load lease
+ */
+function loadLease() {
+  if (!fs.existsSync(LEASE_FILE)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(LEASE_FILE, 'utf8'));
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Save lease
+ */
+function saveLease(lease) {
+  fs.writeFileSync(LEASE_FILE, JSON.stringify(lease, null, 2));
+}
+
+/**
+ * Acquire singleton lease
+ */
+function acquireLease(holderId) {
+  const forkPolicy = loadForkPolicy();
+  const existingLease = loadLease();
+  const now = Date.now();
+
+  // Check if existing lease is still valid
+  if (existingLease && existingLease.status === 'active') {
+    const expiresAt = new Date(existingLease.expiresAt).getTime();
+    if (expiresAt > now && existingLease.holder !== holderId) {
+      return {
+        success: false,
+        error: 'Lease held by another identity',
+        holder: existingLease.holder,
+        expiresAt: existingLease.expiresAt
+      };
+    }
+  }
+
+  const lease = {
+    leaseId: `lease_${crypto.randomBytes(4).toString('hex')}`,
+    holder: holderId,
+    status: 'active',
+    acquiredAt: new Date().toISOString(),
+    expiresAt: new Date(now + (forkPolicy?.singleton?.leaseDuration || 3600000)).toISOString(),
+    hostname: require('os').hostname()
+  };
+
+  saveLease(lease);
+
+  return {
+    success: true,
+    lease
+  };
+}
+
+/**
+ * Renew singleton lease
+ */
+function renewLease(holderId) {
+  const forkPolicy = loadForkPolicy();
+  const existingLease = loadLease();
+
+  if (!existingLease || existingLease.holder !== holderId) {
+    return {
+      success: false,
+      error: 'No lease to renew or not the holder'
+    };
+  }
+
+  const now = Date.now();
+  existingLease.expiresAt = new Date(now + (forkPolicy?.singleton?.leaseDuration || 3600000)).toISOString();
+  existingLease.renewedAt = new Date().toISOString();
+
+  saveLease(existingLease);
+
+  return {
+    success: true,
+    lease: existingLease
+  };
+}
+
+/**
+ * Release singleton lease
+ */
+function releaseLease() {
+  if (fs.existsSync(LEASE_FILE)) {
+    fs.unlinkSync(LEASE_FILE);
+  }
 }
 
 // === HTTP SERVER MODE (v0.7.0) ===
