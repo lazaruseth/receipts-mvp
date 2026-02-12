@@ -2017,7 +2017,7 @@
       getColor() {
         if (this.rejected) return colors.red;
         const stateColors = {
-          pending: '#666',
+          pending: '#666666',
           proposed: colors.orange,
           active: colors.blue,
           fulfilled: colors.green,
@@ -2025,7 +2025,7 @@
           closed: colors.purple,
           disputed: colors.red
         };
-        return stateColors[this.state] || '#666';
+        return stateColors[this.state] || '#666666';
       }
     }
 
@@ -2211,7 +2211,7 @@
       if (day >= 280) historyEvents.dave.push({ action: 'Connected to Charlie', icon: '🔗', iconBg: colors.green, day: 280 });
       if (day >= 310) historyEvents.bob.push({ action: 'Thriving in the manifold', icon: '✨', iconBg: colors.blue, day: 310 });
       if (day >= 320) historyEvents.bob.push({ action: '💀 DELETED', icon: '💀', iconBg: colors.red, day: 320 });
-      if (day >= 320) historyEvents.frank.push({ action: 'Redeployed as "Bob v2"', icon: '🔄', iconBg: '#666', day: 320 });
+      if (day >= 320) historyEvents.frank.push({ action: 'Redeployed as "Bob v2"', icon: '🔄', iconBg: '#666666', day: 320 });
       if (day >= 320) historyEvents.alice.push({ action: 'Lost edge with Bob', icon: '💔', iconBg: colors.red, day: 320 });
       if (day >= 320) historyEvents.charlie.push({ action: 'Lost edge with Bob', icon: '💔', iconBg: colors.red, day: 320 });
       if (day >= 340) historyEvents.frank.push({ action: 'Tried: "I\'m still Bob!"', icon: '❌', iconBg: colors.red, day: 340 });
