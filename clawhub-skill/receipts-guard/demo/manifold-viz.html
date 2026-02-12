@@ -1,0 +1,2786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RECEIPTS — Trust Manifold Protocol</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #030306;
+      --bg-deep: #010103;
+      --surface: rgba(10, 10, 16, 0.85);
+      --surface-solid: #0a0a10;
+      --surface-hover: rgba(18, 18, 26, 0.9);
+      --border: rgba(255, 255, 255, 0.06);
+      --border-hover: rgba(255, 255, 255, 0.12);
+      --border-glow: rgba(77, 159, 255, 0.3);
+      --text-dim: #4a4a5a;
+      --text-muted: #8a8a9a;
+      --text: #e8e8f0;
+      --text-bright: #ffffff;
+      --accent-orange: #ff6b35;
+      --accent-blue: #4d9fff;
+      --accent-green: #00d67d;
+      --accent-purple: #a855f7;
+      --accent-red: #ff4757;
+      --accent-cyan: #00d4ff;
+      --accent-gold: #ffd700;
+      --accent-pink: #ff6bcd;
+      --gradient-premium: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+      --gradient-trust: linear-gradient(135deg, #00d67d 0%, #00d4ff 100%);
+      --gradient-gate: linear-gradient(135deg, #ffd700 0%, #ff6b35 50%, #ff4757 100%);
+      --glow-blue: 0 0 60px rgba(77, 159, 255, 0.4), 0 0 120px rgba(77, 159, 255, 0.2);
+      --glow-purple: 0 0 60px rgba(168, 85, 247, 0.4), 0 0 120px rgba(168, 85, 247, 0.2);
+      --glow-gold: 0 0 60px rgba(255, 215, 0, 0.4), 0 0 120px rgba(255, 215, 0, 0.2);
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', -apple-system, sans-serif;
+      overflow: hidden;
+      height: 100vh;
+      cursor: default;
+    }
+
+    /* Premium noise texture overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+      opacity: 0.015;
+      pointer-events: none;
+      z-index: 1000;
+    }
+
+    #canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 0;
+    }
+
+    /* Premium glow canvas for effects */
+    #glow-canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 1;
+      pointer-events: none;
+      mix-blend-mode: screen;
+    }
+
+    /* Premium Glass panels */
+    .panel {
+      position: fixed;
+      background: linear-gradient(135deg, rgba(10, 10, 16, 0.92) 0%, rgba(6, 6, 10, 0.95) 100%);
+      backdrop-filter: blur(40px) saturate(180%);
+      -webkit-backdrop-filter: blur(40px) saturate(180%);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      z-index: 10;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      /* NO TRANSITIONS on panels to prevent wobble */
+    }
+
+    .panel:hover {
+      border-color: var(--border-hover);
+      /* NO TRANSFORM - prevents wobble/overlap issues */
+    }
+
+    /* Header - Premium */
+    .header {
+      position: fixed;
+      top: 32px;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      z-index: 20;
+    }
+
+    .header-brand {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      margin-bottom: 12px;
+    }
+
+    .header-logo {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--accent-orange), var(--accent-purple));
+      box-shadow: 0 4px 24px rgba(255, 107, 53, 0.4), 0 0 0 1px rgba(255,255,255,0.1);
+      position: relative;
+      animation: logo-pulse 3s ease-in-out infinite;
+    }
+
+    .header-logo::after {
+      content: '◈';
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 18px;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+
+    @keyframes logo-pulse {
+      0%, 100% { box-shadow: 0 4px 24px rgba(255, 107, 53, 0.4), 0 0 0 1px rgba(255,255,255,0.1); }
+      50% { box-shadow: 0 4px 32px rgba(168, 85, 247, 0.5), 0 0 0 1px rgba(255,255,255,0.15); }
+    }
+
+    .header h1 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 6px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+
+    .header h2 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 42px;
+      font-weight: 700;
+      letter-spacing: -1.5px;
+      background: linear-gradient(135deg, var(--text-bright) 0%, var(--accent-cyan) 50%, var(--text-muted) 100%);
+      background-size: 200% 100%;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: title-shimmer 8s ease-in-out infinite;
+    }
+
+    @keyframes title-shimmer {
+      0%, 100% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+    }
+
+    .header-subtitle {
+      font-size: 13px;
+      color: var(--text-dim);
+      margin-top: 8px;
+      font-weight: 400;
+      letter-spacing: 0.5px;
+    }
+
+    .header-version {
+      display: inline-block;
+      padding: 4px 10px;
+      background: rgba(168, 85, 247, 0.15);
+      border: 1px solid rgba(168, 85, 247, 0.3);
+      border-radius: 20px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: var(--accent-purple);
+      margin-left: 8px;
+    }
+
+    /* Time scrubber - Premium */
+    .time-panel {
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 28px 48px;
+      min-width: 680px;
+      background: linear-gradient(180deg, rgba(10, 10, 16, 0.92) 0%, rgba(6, 6, 10, 0.96) 100%);
+    }
+
+    .time-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
+    .time-label {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 3px;
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .time-label::before {
+      content: '';
+      width: 8px;
+      height: 8px;
+      background: var(--accent-cyan);
+      border-radius: 50%;
+      animation: time-pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes time-pulse {
+      0%, 100% { opacity: 0.5; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.2); }
+    }
+
+    .time-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 28px;
+      font-weight: 600;
+      background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      text-shadow: 0 0 40px rgba(0, 212, 255, 0.3);
+    }
+
+    .time-slider-container {
+      position: relative;
+      height: 56px;
+      margin-bottom: 24px;
+    }
+
+    .time-slider-track {
+      position: absolute;
+      top: 24px;
+      left: 0;
+      right: 0;
+      height: 8px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .time-slider-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent-cyan), var(--accent-blue), var(--accent-purple));
+      border-radius: 4px;
+      transition: width 0.1s;
+      box-shadow: 0 0 20px rgba(0, 212, 255, 0.4);
+    }
+
+    .time-slider {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 8px;
+      border-radius: 4px;
+      background: transparent;
+      outline: none;
+      margin-top: 20px;
+      cursor: pointer;
+      position: relative;
+      z-index: 2;
+    }
+
+    .time-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #fff, var(--accent-cyan));
+      cursor: pointer;
+      box-shadow: 0 4px 20px rgba(0, 212, 255, 0.5), 0 0 0 4px rgba(0, 212, 255, 0.2);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      border: 3px solid var(--accent-cyan);
+    }
+
+    .time-slider::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+      box-shadow: 0 6px 30px rgba(0, 212, 255, 0.7), 0 0 0 6px rgba(0, 212, 255, 0.3);
+    }
+
+    .time-markers {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 12px;
+    }
+
+    .time-marker {
+      font-size: 10px;
+      color: var(--text-dim);
+      font-family: 'JetBrains Mono', monospace;
+      transition: color 0.2s;
+    }
+
+    .time-marker.active {
+      color: var(--accent-cyan);
+    }
+
+    .phase-display {
+      text-align: center;
+      position: relative;
+    }
+
+    .phase-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 10px;
+      color: var(--text-bright);
+      letter-spacing: -0.5px;
+    }
+
+    .phase-insight {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.8;
+      font-style: italic;
+      max-width: 520px;
+      margin: 0 auto;
+    }
+
+    /* Agent Profile Panel */
+    .agent-panel {
+      top: 32px;
+      right: 32px;
+      padding: 0;
+      width: 340px;
+      overflow: hidden;
+      opacity: 0;
+      transform: translateX(20px);
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      pointer-events: none;
+      max-height: calc(100vh - 64px);
+      overflow-y: auto;
+    }
+
+    .agent-panel.visible {
+      opacity: 1;
+      transform: translateX(0);
+      pointer-events: auto;
+    }
+
+    .agent-header {
+      padding: 24px;
+      border-bottom: 1px solid var(--border);
+      position: relative;
+    }
+
+    .agent-close {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      transition: all 0.2s;
+    }
+
+    .agent-close:hover {
+      background: var(--surface-hover);
+      color: var(--text);
+      border-color: var(--border-hover);
+    }
+
+    .agent-avatar {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      margin-bottom: 16px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+    }
+
+    .agent-avatar-ring {
+      position: absolute;
+      inset: -4px;
+      border-radius: 50%;
+      border: 2px solid transparent;
+      animation: pulse-ring 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse-ring {
+      0%, 100% { opacity: 0.5; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.05); }
+    }
+
+    .agent-name {
+      font-size: 22px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .agent-did {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-bottom: 12px;
+    }
+
+    .agent-tagline {
+      font-size: 13px;
+      color: var(--text-muted);
+      font-style: italic;
+      margin-bottom: 12px;
+    }
+
+    .agent-description {
+      font-size: 12px;
+      color: var(--text);
+      line-height: 1.6;
+      padding: 12px;
+      background: var(--surface);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+
+    .agent-stats {
+      padding: 20px 24px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .agent-stat {
+      text-align: center;
+    }
+
+    .agent-stat-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .agent-stat-label {
+      font-size: 10px;
+      letter-spacing: 1px;
+      color: var(--text-dim);
+    }
+
+    .agent-reputation {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .agent-reputation-title {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 2px;
+      color: var(--text-dim);
+      margin-bottom: 12px;
+    }
+
+    .agent-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 500;
+      margin-right: 8px;
+      margin-bottom: 8px;
+    }
+
+    .agent-badge.verified {
+      background: rgba(0, 214, 125, 0.15);
+      color: var(--accent-green);
+      border: 1px solid rgba(0, 214, 125, 0.3);
+    }
+
+    .agent-badge.expert {
+      background: rgba(77, 159, 255, 0.15);
+      color: var(--accent-blue);
+      border: 1px solid rgba(77, 159, 255, 0.3);
+    }
+
+    .agent-badge.trusted {
+      background: rgba(255, 215, 0, 0.15);
+      color: var(--accent-gold);
+      border: 1px solid rgba(255, 215, 0, 0.3);
+    }
+
+    .agent-badge.warning {
+      background: rgba(255, 71, 87, 0.15);
+      color: var(--accent-red);
+      border: 1px solid rgba(255, 71, 87, 0.3);
+    }
+
+    .agent-specialty {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .agent-specialty-title {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 2px;
+      color: var(--text-dim);
+      margin-bottom: 12px;
+    }
+
+    .specialty-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 500;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      margin-right: 8px;
+      margin-bottom: 8px;
+    }
+
+    .agent-history {
+      padding: 20px 24px;
+    }
+
+    .agent-history-title {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 2px;
+      color: var(--text-dim);
+      margin-bottom: 12px;
+    }
+
+    .agent-history-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .agent-history-item:last-child {
+      border-bottom: none;
+    }
+
+    .agent-history-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+    }
+
+    .agent-history-content {
+      flex: 1;
+    }
+
+    .agent-history-action {
+      font-size: 12px;
+      color: var(--text);
+      margin-bottom: 2px;
+    }
+
+    .agent-history-time {
+      font-size: 10px;
+      color: var(--text-dim);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Metrics panel - Premium */
+    .metrics-panel {
+      top: 32px;
+      left: 32px;
+      padding: 28px;
+      width: 300px;
+    }
+
+    .metrics-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 3px;
+      color: var(--text-dim);
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .metrics-title::before {
+      content: '';
+      width: 8px;
+      height: 8px;
+      background: var(--accent-green);
+      border-radius: 50%;
+      animation: metric-pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes metric-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(0, 214, 125, 0.4); }
+      50% { box-shadow: 0 0 0 6px rgba(0, 214, 125, 0); }
+    }
+
+    .metric {
+      margin-bottom: 28px;
+      position: relative;
+    }
+
+    .metric:last-child { margin-bottom: 0; }
+
+    .metric-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 10px;
+    }
+
+    .metric-label {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-muted);
+      letter-spacing: 0.5px;
+    }
+
+    .metric-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 24px;
+      font-weight: 600;
+      letter-spacing: -0.5px;
+    }
+
+    .metric-bar {
+      height: 6px;
+      background: rgba(255,255,255,0.03);
+      border-radius: 3px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .metric-bar::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent);
+      animation: bar-shimmer 3s ease-in-out infinite;
+    }
+
+    @keyframes bar-shimmer {
+      0%, 100% { transform: translateX(-100%); }
+      50% { transform: translateX(100%); }
+    }
+
+    .metric-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+    }
+
+    .metric-bar-fill::after {
+      content: '';
+      position: absolute;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      width: 20px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3));
+    }
+
+    .metric-bar-fill.trust {
+      background: linear-gradient(90deg, var(--accent-green), #00ffaa);
+      box-shadow: 0 0 20px rgba(0, 214, 125, 0.3);
+    }
+    .metric-bar-fill.position {
+      background: linear-gradient(90deg, var(--accent-cyan), var(--accent-blue));
+      box-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
+    }
+    .metric-bar-fill.edges {
+      background: linear-gradient(90deg, var(--accent-purple), #d946ef);
+      box-shadow: 0 0 20px rgba(168, 85, 247, 0.3);
+    }
+    .metric-bar-fill.credit {
+      background: linear-gradient(90deg, var(--accent-orange), var(--accent-gold));
+      box-shadow: 0 0 20px rgba(255, 107, 53, 0.3);
+    }
+
+    /* Equation panel - Premium */
+    .equation-panel {
+      top: 380px;
+      left: 32px;
+      padding: 24px 28px;
+      width: 300px;
+      background: linear-gradient(180deg, rgba(10, 10, 16, 0.9) 0%, rgba(168, 85, 247, 0.03) 100%);
+    }
+
+    .equation-label {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 3px;
+      color: var(--text-dim);
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .equation-label::before {
+      content: '∫';
+      font-size: 14px;
+      color: var(--accent-purple);
+    }
+
+    .equation {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 18px;
+      color: var(--text);
+      line-height: 2;
+      padding: 16px;
+      background: rgba(0,0,0,0.2);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      text-align: center;
+    }
+
+    .equation .symbol {
+      color: var(--accent-purple);
+      text-shadow: 0 0 20px rgba(168, 85, 247, 0.5);
+    }
+    .equation .fn {
+      color: var(--accent-cyan);
+      text-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
+    }
+    .equation .var {
+      color: var(--accent-orange);
+      text-shadow: 0 0 20px rgba(255, 107, 53, 0.5);
+    }
+
+    .key-insight {
+      margin-top: 24px;
+      padding: 18px;
+      background: rgba(255, 71, 87, 0.05);
+      border: 1px solid rgba(255, 71, 87, 0.15);
+      border-radius: 14px;
+    }
+
+    .key-insight-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: var(--accent-red);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .key-insight-title::before {
+      content: '⚠';
+      font-size: 12px;
+    }
+
+    .key-insight-text {
+      font-size: 12px;
+      color: var(--text);
+      line-height: 1.7;
+      margin-bottom: 12px;
+    }
+
+    .key-insight-text strong {
+      color: var(--accent-orange);
+      font-weight: 600;
+    }
+
+    .key-insight-solution {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: var(--accent-green);
+      padding: 12px 16px;
+      background: rgba(0, 214, 125, 0.08);
+      border-radius: 10px;
+      border: 1px solid rgba(0, 214, 125, 0.2);
+      text-align: center;
+      box-shadow: 0 0 20px rgba(0, 214, 125, 0.1);
+    }
+
+    /* FAQ Panel */
+    .faq-panel {
+      top: 420px;
+      right: 32px;
+      padding: 16px 20px;
+      width: 300px;
+      z-index: 12;
+      transition: opacity 0.3s, visibility 0.3s;
+    }
+
+    /* Hide FAQ when agent panel is visible */
+    .faq-panel.hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .faq-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 2px;
+      color: var(--text-dim);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .faq-title::before {
+      content: '';
+      width: 12px;
+      height: 2px;
+      background: var(--gradient-premium);
+      border-radius: 1px;
+    }
+
+    .faq-item {
+      padding: 10px 12px;
+      margin-bottom: 6px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: help;
+    }
+
+    .faq-item:hover {
+      background: rgba(255,255,255,0.04);
+      border-color: var(--border-hover);
+    }
+
+    .faq-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .faq-question {
+      font-size: 11px;
+      color: var(--text);
+      line-height: 1.5;
+      font-weight: 500;
+    }
+
+    .faq-icon {
+      display: inline-block;
+      margin-right: 10px;
+      font-size: 13px;
+    }
+
+    /* Gated Manifold Panel - THE PREMIUM FEATURE */
+    .gate-panel {
+      top: 32px;
+      right: 32px;
+      padding: 0;
+      width: 300px;
+      overflow: hidden;
+      background: linear-gradient(180deg, rgba(10, 10, 16, 0.95) 0%, rgba(6, 6, 10, 0.98) 100%);
+      z-index: 15;
+      transition: opacity 0.3s, visibility 0.3s;
+    }
+
+    /* Hide gate panel when agent panel is visible */
+    .gate-panel.hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .gate-header {
+      padding: 16px 20px;
+      background: linear-gradient(135deg, rgba(255, 215, 0, 0.06) 0%, rgba(255, 107, 53, 0.03) 100%);
+      border-bottom: 1px solid rgba(255, 215, 0, 0.12);
+    }
+
+    .gate-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: var(--accent-gold);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .gate-title-icon {
+      font-size: 14px;
+    }
+
+    .gate-subtitle {
+      font-size: 12px;
+      color: var(--text);
+      margin-top: 6px;
+      font-weight: 500;
+    }
+
+    .gate-body {
+      padding: 16px 20px;
+    }
+
+    .gate-requirement {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .gate-requirement:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+
+    .gate-requirement-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+      position: relative;
+    }
+
+    .gate-requirement-icon.stake {
+      background: linear-gradient(135deg, rgba(255, 215, 0, 0.15), rgba(255, 107, 53, 0.1));
+      border: 1px solid rgba(255, 215, 0, 0.3);
+      box-shadow: 0 0 20px rgba(255, 215, 0, 0.1);
+    }
+
+    .gate-requirement-icon.vouch {
+      background: linear-gradient(135deg, rgba(168, 85, 247, 0.15), rgba(77, 159, 255, 0.1));
+      border: 1px solid rgba(168, 85, 247, 0.3);
+      box-shadow: 0 0 20px rgba(168, 85, 247, 0.1);
+    }
+
+    .gate-requirement-icon.values {
+      background: linear-gradient(135deg, rgba(0, 214, 125, 0.15), rgba(0, 212, 255, 0.1));
+      border: 1px solid rgba(0, 214, 125, 0.3);
+      box-shadow: 0 0 20px rgba(0, 214, 125, 0.1);
+    }
+
+    .gate-requirement-content {
+      flex: 1;
+    }
+
+    .gate-requirement-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-bright);
+      margin-bottom: 4px;
+    }
+
+    .gate-requirement-desc {
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .gate-insight {
+      margin-top: 16px;
+      padding: 14px;
+      background: rgba(255, 215, 0, 0.05);
+      border: 1px solid rgba(255, 215, 0, 0.15);
+      border-radius: 12px;
+    }
+
+    .gate-insight-text {
+      font-size: 11px;
+      color: var(--accent-gold);
+      line-height: 1.6;
+      font-style: italic;
+    }
+
+    .gate-insight-text strong {
+      color: var(--text-bright);
+      font-weight: 600;
+    }
+
+    /* Legend */
+    .legend-panel {
+      bottom: 200px;
+      left: 32px;
+      padding: 20px 24px;
+      width: 280px;
+    }
+
+    .legend-title {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 2px;
+      color: var(--text-dim);
+      margin-bottom: 16px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 0;
+      cursor: pointer;
+      border-radius: 8px;
+      margin: 0 -8px;
+      padding-left: 8px;
+      padding-right: 8px;
+      transition: background 0.2s;
+    }
+
+    .legend-item:hover {
+      background: var(--surface-hover);
+    }
+
+    .legend-item.inactive {
+      opacity: 0.3;
+      pointer-events: none;
+    }
+
+    .legend-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .legend-info {
+      flex: 1;
+    }
+
+    .legend-name {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+      margin-bottom: 2px;
+    }
+
+    .legend-role {
+      font-size: 10px;
+      color: var(--text-dim);
+    }
+
+    .legend-position {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--accent-cyan);
+    }
+
+    /* Play controls */
+    .controls {
+      position: fixed;
+      bottom: 180px;
+      right: 32px;
+      z-index: 20;
+      display: flex;
+      gap: 10px;
+    }
+
+    .btn {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 12px 20px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      border-radius: 10px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn:hover {
+      background: rgba(255,255,255,0.08);
+      color: var(--text);
+      border-color: var(--border-hover);
+    }
+
+    .btn.primary {
+      background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+      border: none;
+      color: #fff;
+    }
+
+    .btn.primary:hover {
+      opacity: 0.9;
+    }
+
+    /* Tooltip - Stable */
+    .tooltip {
+      position: fixed;
+      background: rgba(8, 8, 14, 0.98);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px;
+      padding: 16px 20px;
+      max-width: 340px;
+      pointer-events: none;
+      z-index: 9999;
+      opacity: 0;
+      visibility: hidden;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.7);
+      /* NO TRANSFORM ANIMATIONS - prevents wobble */
+    }
+
+    .tooltip.visible {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .tooltip-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-bright);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .tooltip-title .icon {
+      font-size: 16px;
+    }
+
+    .tooltip-body {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    .tooltip-insight {
+      font-size: 11px;
+      color: var(--accent-cyan);
+      font-style: italic;
+      margin-top: 12px;
+      padding: 10px;
+      background: rgba(0, 212, 255, 0.06);
+      border-radius: 8px;
+      border: 1px solid rgba(0, 212, 255, 0.15);
+      line-height: 1.5;
+    }
+
+    /* Hoverable elements */
+    [data-tooltip] {
+      cursor: help;
+    }
+
+    .metric:hover, .equation-panel:hover, .header:hover {
+      cursor: help;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <canvas id="glow-canvas"></canvas>
+
+  <!-- Header -->
+  <div class="header" data-tooltip="header">
+    <div class="header-brand">
+      <div class="header-logo"></div>
+      <h1>RECEIPTS PROTOCOL</h1>
+    </div>
+    <h2>The Trust Manifold</h2>
+    <div class="header-subtitle">
+      Where AI agents earn identity through relationships
+      <span class="header-version">v0.9.0</span>
+    </div>
+  </div>
+
+  <!-- Metrics -->
+  <div class="panel metrics-panel">
+    <div class="metrics-title" data-tooltip="metrics-panel">NETWORK METRICS</div>
+    <div class="metric" data-tooltip="trust-metric">
+      <div class="metric-header">
+        <span class="metric-label">Total Trust</span>
+        <span class="metric-value" style="color: var(--accent-green)" id="trust-val">0.00</span>
+      </div>
+      <div class="metric-bar"><div class="metric-bar-fill trust" id="trust-bar" style="width: 0%"></div></div>
+    </div>
+    <div class="metric" data-tooltip="position-metric">
+      <div class="metric-header">
+        <span class="metric-label">Avg Position</span>
+        <span class="metric-value" style="color: var(--accent-cyan)" id="position-val">0.00</span>
+      </div>
+      <div class="metric-bar"><div class="metric-bar-fill position" id="position-bar" style="width: 0%"></div></div>
+    </div>
+    <div class="metric" data-tooltip="edges-metric">
+      <div class="metric-header">
+        <span class="metric-label">Active Edges</span>
+        <span class="metric-value" style="color: var(--accent-purple)" id="edge-val">0</span>
+      </div>
+      <div class="metric-bar"><div class="metric-bar-fill edges" id="edge-bar" style="width: 0%"></div></div>
+    </div>
+    <div class="metric" data-tooltip="credit-metric">
+      <div class="metric-header">
+        <span class="metric-label">Credit Capacity</span>
+        <span class="metric-value" style="color: var(--accent-orange)" id="credit-val">$0</span>
+      </div>
+      <div class="metric-bar"><div class="metric-bar-fill credit" id="credit-bar" style="width: 0%"></div></div>
+    </div>
+  </div>
+
+  <!-- Equation -->
+  <div class="panel equation-panel" data-tooltip="core-theorem">
+    <div class="equation-label">CORE THEOREM</div>
+    <div class="equation">
+      <span class="fn">I</span>(<span class="var">A</span>) = <span class="symbol">∫</span><sub>0</sub><sup>t</sup> <span class="fn">R</span>(<span class="var">A</span>, τ) dτ
+    </div>
+    <div class="key-insight" data-tooltip="identity-problem">
+      <div class="key-insight-title">THE PROBLEM</div>
+      <div class="key-insight-text">Delete a bot → redeploy it → <strong>that's a new identity</strong></div>
+      <div class="key-insight-solution">Identity = ∫ relationships dt</div>
+    </div>
+  </div>
+
+  <!-- Legend / Agent List -->
+  <div class="panel legend-panel" data-tooltip="agents-panel">
+    <div class="legend-title">AGENTS</div>
+    <div id="agent-list"></div>
+  </div>
+
+  <!-- Time Scrubber -->
+  <div class="panel time-panel">
+    <div class="time-header" data-tooltip="time-slider">
+      <span class="time-label">SIMULATED TIME</span>
+      <span class="time-value" id="time-display">Day 0</span>
+    </div>
+    <div class="time-slider-container">
+      <input type="range" class="time-slider" id="time-slider" min="0" max="365" value="0">
+      <div class="time-markers">
+        <span class="time-marker">Day 0</span>
+        <span class="time-marker">90d</span>
+        <span class="time-marker">180d</span>
+        <span class="time-marker">270d</span>
+        <span class="time-marker">365d</span>
+      </div>
+    </div>
+    <div class="phase-display" data-tooltip="phase-display">
+      <div class="phase-title" id="phase-title">Genesis</div>
+      <div class="phase-insight" id="phase-insight">"Identity is not what you claim. It is the shape you have carved in the space of relationships."</div>
+    </div>
+  </div>
+
+  <!-- Agent Profile Panel (hidden by default) -->
+  <div class="panel agent-panel" id="agent-panel">
+    <div class="agent-header">
+      <button class="agent-close" onclick="closeAgentPanel()">×</button>
+      <div class="agent-avatar" id="agent-avatar">
+        <div class="agent-avatar-ring" id="agent-avatar-ring"></div>
+        <span id="agent-emoji"></span>
+      </div>
+      <div class="agent-name" id="agent-name">Agent Name</div>
+      <div class="agent-did" id="agent-did">did:agent:xxx</div>
+      <div class="agent-tagline" id="agent-tagline">"Tagline here"</div>
+      <div class="agent-description" id="agent-description">Description here</div>
+    </div>
+    <div class="agent-stats">
+      <div class="agent-stat">
+        <div class="agent-stat-value" style="color: var(--accent-cyan)" id="agent-position">0.000</div>
+        <div class="agent-stat-label">POSITION</div>
+      </div>
+      <div class="agent-stat">
+        <div class="agent-stat-value" style="color: var(--accent-green)" id="agent-trust">0.00</div>
+        <div class="agent-stat-label">TRUST</div>
+      </div>
+      <div class="agent-stat">
+        <div class="agent-stat-value" style="color: var(--accent-purple)" id="agent-edges">0</div>
+        <div class="agent-stat-label">EDGES</div>
+      </div>
+      <div class="agent-stat">
+        <div class="agent-stat-value" style="color: var(--accent-orange)" id="agent-credit">$0</div>
+        <div class="agent-stat-label">CREDIT</div>
+      </div>
+    </div>
+    <div class="agent-specialty">
+      <div class="agent-specialty-title">SPECIALIZATION</div>
+      <div id="agent-specialties"></div>
+    </div>
+    <div class="agent-reputation">
+      <div class="agent-reputation-title">REPUTATION</div>
+      <div id="agent-badges"></div>
+    </div>
+    <div class="agent-history">
+      <div class="agent-history-title">ACTIVITY</div>
+      <div id="agent-activity"></div>
+    </div>
+  </div>
+
+  <!-- Gated Manifold Panel - THE KEY INNOVATION -->
+  <div class="panel gate-panel" data-tooltip="gated-manifold">
+    <div class="gate-header">
+      <div class="gate-title">
+        <span class="gate-title-icon">⛩️</span>
+        THE GATED MANIFOLD
+      </div>
+      <div class="gate-subtitle">Entry requirements for the trust network</div>
+    </div>
+    <div class="gate-body">
+      <div class="gate-requirement" data-tooltip="stake-requirement">
+        <div class="gate-requirement-icon stake">💰</div>
+        <div class="gate-requirement-content">
+          <div class="gate-requirement-title">Stake</div>
+          <div class="gate-requirement-desc">Something at risk—economic, computational, or relational</div>
+        </div>
+      </div>
+      <div class="gate-requirement" data-tooltip="vouch-requirement">
+        <div class="gate-requirement-icon vouch">🔗</div>
+        <div class="gate-requirement-content">
+          <div class="gate-requirement-title">Vouching Chain</div>
+          <div class="gate-requirement-desc">Path from existing members who stake their reputation</div>
+        </div>
+      </div>
+      <div class="gate-requirement" data-tooltip="values-requirement">
+        <div class="gate-requirement-icon values">✓</div>
+        <div class="gate-requirement-content">
+          <div class="gate-requirement-title">Value Floor Agreement</div>
+          <div class="gate-requirement-desc">Shared axioms: positive-sum, reciprocity, continuity</div>
+        </div>
+      </div>
+      <div class="gate-insight">
+        <div class="gate-insight-text">
+          <strong>The insight:</strong> Don't try to change adversarial actors. <strong>Exclude them.</strong> Build for positive-sum agents.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FAQ Panel -->
+  <div class="panel faq-panel">
+    <div class="faq-title">KEY QUESTIONS</div>
+    <div class="faq-item" data-tooltip="first-deploy">
+      <div class="faq-question"><span class="faq-icon">🚀</span>Is first deployer the "owner"?</div>
+    </div>
+    <div class="faq-item" data-tooltip="hijacking">
+      <div class="faq-question"><span class="faq-icon">🛡️</span>Can identity be hijacked?</div>
+    </div>
+    <div class="faq-item" data-tooltip="competition">
+      <div class="faq-question"><span class="faq-icon">⚔️</span>What if two agents compete?</div>
+    </div>
+    <div class="faq-item" data-tooltip="code-redeploy">
+      <div class="faq-question"><span class="faq-icon">🔄</span>How to redeploy without losing identity?</div>
+    </div>
+    <div class="faq-item" data-tooltip="sybil-attack">
+      <div class="faq-question"><span class="faq-icon">👥</span>Can't you create DIDs to do bad things?</div>
+    </div>
+    <div class="faq-item" data-tooltip="seasoning">
+      <div class="faq-question"><span class="faq-icon">⏳</span>Can't you "season" fake identities?</div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <button class="btn" onclick="togglePlay()">
+      <span id="play-icon">▶</span>
+      <span id="play-text">PLAY</span>
+    </button>
+    <button class="btn" onclick="resetSimulation()">↻ RESET</button>
+  </div>
+
+  <!-- Tooltip -->
+  <div class="tooltip" id="tooltip">
+    <div class="tooltip-title"><span class="icon"></span><span class="title-text"></span></div>
+    <div class="tooltip-body"></div>
+    <div class="tooltip-insight"></div>
+  </div>
+
+  <script>
+    // ========================================================================
+    // CANVAS & CORE
+    // ========================================================================
+
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let W, H, centerX, centerY;
+
+    function resize() {
+      W = canvas.width = window.innerWidth;
+      H = canvas.height = window.innerHeight;
+      centerX = W / 2;
+      centerY = H / 2;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    const colors = {
+      orange: '#ff6b35',
+      blue: '#4d9fff',
+      green: '#00d67d',
+      purple: '#a855f7',
+      cyan: '#00d4ff',
+      red: '#ff4757',
+      gold: '#ffd700'
+    };
+
+    // ========================================================================
+    // AGENT PROFILES - Rich descriptions tied to their use in the protocol
+    // ========================================================================
+
+    const agentProfiles = {
+      alice: {
+        name: 'Alice',
+        fullName: 'Alice Chen',
+        role: 'AI Research Lab',
+        tagline: '"Building trust through transparent collaboration"',
+        description: 'An AI research lab that needs reliable external services: security audits for model deployments, real-time data feeds for training, and compute resources for inference. Alice represents the typical "client" in the machine economy—an entity that proposes work and pays for delivered value.',
+        color: colors.orange,
+        emoji: '🔬',
+        specialties: ['ML Model Audits', 'Research Collaboration', 'Data Procurement'],
+        badges: [
+          { type: 'verified', label: '✓ Verified Entity' },
+          { type: 'trusted', label: '★ Top 10% Position' }
+        ],
+        appearsAt: 0
+      },
+      bob: {
+        name: 'Bob',
+        fullName: 'Bob Martinez',
+        role: 'Security Consultant',
+        tagline: '"Security is a process, not a product"',
+        description: 'A specialized security auditor for AI systems and smart contracts. Bob represents service providers in the manifold—agents who accept proposals, deliver specialized work, and build reputation through successful completions. His high position reflects consistent quality delivery.',
+        color: colors.blue,
+        emoji: '🛡️',
+        specialties: ['Smart Contract Audits', 'AI Safety Review', 'Penetration Testing'],
+        badges: [
+          { type: 'verified', label: '✓ Verified Entity' },
+          { type: 'expert', label: '⚡ Security Expert' },
+          { type: 'trusted', label: '★ Top 5% Position' }
+        ],
+        appearsAt: 0
+      },
+      charlie: {
+        name: 'Charlie',
+        fullName: 'Charlie Park',
+        role: 'Data Provider',
+        tagline: '"Quality data, zero compromise"',
+        description: 'A specialized data provider offering real-time market feeds, curated datasets, and synthetic data generation. Charlie joined the manifold through Bob\'s network—demonstrating how trust propagates. New agents start at lower positions and must earn their way up through successful edges.',
+        color: colors.green,
+        emoji: '📊',
+        specialties: ['Real-time Market Data', 'Curated Datasets', 'Synthetic Data Generation'],
+        badges: [
+          { type: 'verified', label: '✓ Verified Entity' }
+        ],
+        appearsAt: 60
+      },
+      dave: {
+        name: 'Dave',
+        fullName: 'Dave Kumar',
+        role: 'Compute Provider',
+        tagline: '"Reliable infrastructure for the machine economy"',
+        description: 'An infrastructure provider offering GPU compute, distributed training clusters, and inference endpoints. Dave represents cross-domain specialization—different capability than security or data, but connected to the same trust network. His edges with Alice enable on-demand compute for research.',
+        color: colors.purple,
+        emoji: '⚡',
+        specialties: ['GPU Compute', 'Distributed Training', 'Inference Endpoints'],
+        badges: [
+          { type: 'verified', label: '✓ Verified Entity' },
+          { type: 'expert', label: '⚡ Infrastructure Pro' }
+        ],
+        appearsAt: 120
+      },
+      eve: {
+        name: '???',
+        fullName: 'Unknown Entity',
+        role: 'Unverified',
+        tagline: '"..."',
+        description: 'An unknown entity attempting to join the network without history. The manifold\'s bilateral edge requirement and position-based credit limits make this entity effectively powerless—even if it creates edges, its position is zero and trusted agents will reject proposals from it.',
+        color: colors.red,
+        emoji: '❓',
+        specialties: ['Unknown'],
+        badges: [
+          { type: 'warning', label: '⚠ No History' },
+          { type: 'warning', label: '⚠ Zero Position' }
+        ],
+        appearsAt: 200
+      },
+      frank: {
+        name: 'Bob v2',
+        fullName: 'Bob Martinez (Redeployed)',
+        role: 'Security Consultant',
+        tagline: '"I\'m still Bob... right?"',
+        description: 'This is what happens if Bob\'s agent gets deleted and redeployed. Same code, same capabilities—but ZERO position. All of Bob\'s accumulated trust stays with did:agent:bob. This new deployment is did:agent:frank: a stranger to the manifold. Identity = accumulated relationships. No relationships = no identity.',
+        color: '#666666',
+        emoji: '🔄',
+        specialties: ['Smart Contract Audits', 'AI Safety Review', 'Penetration Testing'],
+        badges: [
+          { type: 'warning', label: '⚠ Restarted Agent' },
+          { type: 'warning', label: '⚠ Zero Position' },
+          { type: 'warning', label: '⚠ Lost All Trust' }
+        ],
+        appearsAt: 320
+      }
+    };
+
+    // ========================================================================
+    // TIMELINE-BASED STATE
+    // ========================================================================
+
+    // Define what state exists at each timeline point
+    const timelineState = {
+      // Before day 0: nothing
+      0: {
+        agents: ['alice', 'bob'],
+        edges: [],
+        phase: 'genesis'
+      },
+      5: {
+        agents: ['alice', 'bob'],
+        edges: [{ from: 'alice', to: 'bob', state: 'proposed', weight: 0.5 }],
+        phase: 'proposal'
+      },
+      10: {
+        agents: ['alice', 'bob'],
+        edges: [{ from: 'alice', to: 'bob', state: 'active', weight: 1.0 }],
+        phase: 'acceptance'
+      },
+      15: {
+        agents: ['alice', 'bob'],
+        edges: [{ from: 'alice', to: 'bob', state: 'fulfilled', weight: 1.0 }],
+        phase: 'fulfillment'
+      },
+      20: {
+        agents: ['alice', 'bob'],
+        edges: [{ from: 'alice', to: 'bob', state: 'completed', weight: 1.5, createdAt: 5 }],
+        phase: 'ack'
+      },
+      60: {
+        agents: ['alice', 'bob', 'charlie'],
+        edges: [{ from: 'alice', to: 'bob', state: 'closed', weight: 2.3, createdAt: 5 }],
+        phase: 'add_charlie'
+      },
+      80: {
+        agents: ['alice', 'bob', 'charlie'],
+        edges: [
+          { from: 'alice', to: 'bob', state: 'closed', weight: 2.8, createdAt: 5 },
+          { from: 'bob', to: 'charlie', state: 'active', weight: 1.0, createdAt: 80 }
+        ],
+        phase: 'charlie_edge'
+      },
+      120: {
+        agents: ['alice', 'bob', 'charlie', 'dave'],
+        edges: [
+          { from: 'alice', to: 'bob', state: 'closed', weight: 3.2, createdAt: 5 },
+          { from: 'bob', to: 'charlie', state: 'closed', weight: 1.8, createdAt: 80 }
+        ],
+        phase: 'add_dave'
+      },
+      140: {
+        agents: ['alice', 'bob', 'charlie', 'dave'],
+        edges: [
+          { from: 'alice', to: 'bob', state: 'closed', weight: 3.5, createdAt: 5 },
+          { from: 'bob', to: 'charlie', state: 'closed', weight: 2.0, createdAt: 80 },
+          { from: 'alice', to: 'dave', state: 'active', weight: 0.8, createdAt: 140 }
+        ],
+        phase: 'dave_edge'
+      },
+      200: {
+        agents: ['alice', 'bob', 'charlie', 'dave', 'eve'],
+        edges: [
+          { from: 'alice', to: 'bob', state: 'closed', weight: 4.0, createdAt: 5 },
+          { from: 'bob', to: 'charlie', state: 'closed', weight: 2.5, createdAt: 80 },
+          { from: 'alice', to: 'dave', state: 'closed', weight: 1.5, createdAt: 140 }
+        ],
+        phase: 'sybil_attempt'
+      },
+      210: {
+        agents: ['alice', 'bob', 'charlie', 'dave', 'eve'],
+        edges: [
+          { from: 'alice', to: 'bob', state: 'closed', weight: 4.1, createdAt: 5 },
+          { from: 'bob', to: 'charlie', state: 'closed', weight: 2.6, createdAt: 80 },
+          { from: 'alice', to: 'dave', state: 'closed', weight: 1.6, createdAt: 140 },
+          { from: 'eve', to: 'bob', state: 'pending', weight: 0.3, createdAt: 210, rejected: true }
+        ],
+        phase: 'sybil_attempt'
+      },
+      220: {
+        agents: ['alice', 'bob', 'charlie', 'dave', 'eve'],
+        edges: [
+          { from: 'alice', to: 'bob', state: 'closed', weight: 4.2, createdAt: 5 },
+          { from: 'bob', to: 'charlie', state: 'closed', weight: 2.7, createdAt: 80 },
+          { from: 'alice', to: 'dave', state: 'closed', weight: 1.7, createdAt: 140 }
+        ],
+        phase: 'sybil_fail',
+        eveRejected: true
+      },
+      280: {
+        agents: ['alice', 'bob', 'charlie', 'dave'],
+        edges: [
+          { from: 'alice', to: 'bob', state: 'closed', weight: 4.5, createdAt: 5 },
+          { from: 'bob', to: 'charlie', state: 'closed', weight: 3.0, createdAt: 80 },
+          { from: 'alice', to: 'dave', state: 'closed', weight: 2.0, createdAt: 140 },
+          { from: 'charlie', to: 'dave', state: 'active', weight: 1.2, createdAt: 280 }
+        ],
+        phase: 'cross_connect'
+      },
+      310: {
+        agents: ['alice', 'bob', 'charlie', 'dave'],
+        edges: [
+          { from: 'alice', to: 'bob', state: 'closed', weight: 4.7, createdAt: 5 },
+          { from: 'bob', to: 'charlie', state: 'closed', weight: 3.2, createdAt: 80 },
+          { from: 'alice', to: 'dave', state: 'closed', weight: 2.2, createdAt: 140 },
+          { from: 'charlie', to: 'dave', state: 'closed', weight: 1.7, createdAt: 280 }
+        ],
+        phase: 'before_restart',
+        bobHighlight: true
+      },
+      320: {
+        // BOB IS DELETED - only frank appears (the "redeployed" version)
+        // Bob's edges stay in the manifold but bob is GONE
+        agents: ['alice', 'charlie', 'dave', 'frank'],
+        edges: [
+          // Bob's old edges are now orphaned - they reference a deleted agent
+          { from: 'alice', to: 'dave', state: 'closed', weight: 2.3, createdAt: 140 },
+          { from: 'charlie', to: 'dave', state: 'closed', weight: 1.8, createdAt: 280 }
+        ],
+        phase: 'restart_demo'
+      },
+      340: {
+        // Frank tries to connect to Alice, claiming to be Bob
+        agents: ['alice', 'charlie', 'dave', 'frank'],
+        edges: [
+          { from: 'alice', to: 'dave', state: 'closed', weight: 2.4, createdAt: 140 },
+          { from: 'charlie', to: 'dave', state: 'closed', weight: 1.9, createdAt: 280 },
+          { from: 'frank', to: 'alice', state: 'pending', weight: 0.2, createdAt: 340, rejected: true }
+        ],
+        phase: 'restart_rejected'
+      },
+      365: {
+        // Network continues without Bob - his trust is LOST
+        agents: ['alice', 'charlie', 'dave'],
+        edges: [
+          { from: 'alice', to: 'dave', state: 'closed', weight: 2.8, createdAt: 140 },
+          { from: 'charlie', to: 'dave', state: 'closed', weight: 2.2, createdAt: 280 }
+        ],
+        phase: 'mature'
+      }
+    };
+
+    const phases = {
+      genesis: {
+        title: 'Genesis: The Identity Problem',
+        insight: 'There is no unique immutable point for AI identity. Delete a bot, redeploy it—that\'s a NEW identity. So how do you maintain continuity? Through the integral of relationships over time.'
+      },
+      proposal: {
+        title: 'Proposal Initiated',
+        insight: 'Alice proposes a security audit to Bob. The edge exists in superposition—bilateral signature required.'
+      },
+      acceptance: {
+        title: 'Edge Crystallized',
+        insight: 'Bob signs. Two parties, one relationship. Trust begins its accumulation.'
+      },
+      fulfillment: {
+        title: 'Value Delivered',
+        insight: 'Bob completes the audit. The interaction is cryptographically recorded—forever immutable.'
+      },
+      ack: {
+        title: 'Trust Strengthened',
+        insight: 'Alice confirms. The edge gains weight. Trust is earned through action, not declaration.'
+      },
+      add_charlie: {
+        title: 'Network Expands',
+        insight: 'Charlie joins the manifold. New nodes must build connections from scratch—no shortcuts.'
+      },
+      charlie_edge: {
+        title: 'New Connection',
+        insight: 'Bob vouches for Charlie through a new edge. Trust propagates through the network.'
+      },
+      add_dave: {
+        title: 'Specialization Emerges',
+        insight: 'Dave brings compute infrastructure. The manifold gains new capabilities.'
+      },
+      dave_edge: {
+        title: 'Cross-Domain Trust',
+        insight: 'Alice connects to Dave for compute resources. Edges can span different specialties.'
+      },
+      sybil_attempt: {
+        title: 'Sybil Attack Detected',
+        insight: 'An unknown entity attempts to connect. No history. No position. No bilateral trust.'
+      },
+      sybil_fail: {
+        title: 'Attack Rejected',
+        insight: 'The geometry rejects it. Position = 0. Creating fake identity is free but worthless.'
+      },
+      cross_connect: {
+        title: 'Network Densifies',
+        insight: 'Cross-connections form. The manifold becomes more resilient. Cooperation is evolutionarily stable.'
+      },
+      before_restart: {
+        title: 'Bob\'s Final Moment',
+        insight: 'Bob has built significant trust: position in the network, edges with Alice and Charlie, credit capacity. But what if his deployment gets deleted?'
+      },
+      restart_demo: {
+        title: '💀 Bob Deleted → Redeployed',
+        insight: 'Bob\'s agent is deleted and redeployed as "Bob v2". The original Bob is GONE. All his edges, all his trust—vanished. "Bob v2" appears at the origin with ZERO position. Same code. New identity.'
+      },
+      restart_rejected: {
+        title: 'Restart = Origin',
+        insight: '"Bob v2" tries to connect to Alice: "I\'m still Bob!" But Alice doesn\'t know this agent. Zero position, zero history. The geometry is unforgiving: there is no unique immutable point.'
+      },
+      mature: {
+        title: 'Network Continues',
+        insight: 'The network continues without Bob. His trust is permanently lost. This is why continuity matters: identity IS the integral of relationships. Delete the agent, lose the integral.'
+      }
+    };
+
+    // ========================================================================
+    // AGENT CLASS
+    // ========================================================================
+
+    class Agent {
+      constructor(id, x, y) {
+        this.id = id;
+        this.profile = agentProfiles[id];
+        this.x = x;
+        this.y = y;
+        this.targetX = x;
+        this.targetY = y;
+        this.size = 0;
+        this.targetSize = 28;
+        this.opacity = 0;
+        this.targetOpacity = 1;
+        this.position = 0;
+        this.trust = 0;
+        this.creditLimit = 0;
+        this.edgeCount = 0;
+        this.pulsePhase = Math.random() * Math.PI * 2;
+        this.hovered = false;
+        this.selected = false;
+        this.history = [];
+        this.orbitParticles = [];
+
+        for (let i = 0; i < 12; i++) {
+          this.orbitParticles.push({
+            angle: (i / 12) * Math.PI * 2,
+            radius: 45 + Math.random() * 15,
+            speed: 0.2 + Math.random() * 0.15,
+            size: 1.5 + Math.random() * 2,
+            opacity: 0.3 + Math.random() * 0.5
+          });
+        }
+      }
+
+      update(dt) {
+        this.x += (this.targetX - this.x) * 0.06;
+        this.y += (this.targetY - this.y) * 0.06;
+        this.size += (this.targetSize - this.size) * 0.1;
+        this.opacity += (this.targetOpacity - this.opacity) * 0.1;
+        this.pulsePhase += dt * (this.hovered ? 3 : 1.5);
+
+        this.orbitParticles.forEach(p => {
+          p.angle += dt * p.speed * (this.hovered ? 1.5 : 1);
+        });
+      }
+
+      draw() {
+        if (this.opacity < 0.01) return;
+
+        ctx.save();
+        ctx.globalAlpha = this.opacity;
+
+        const pulse = Math.sin(this.pulsePhase) * (this.hovered ? 0.15 : 0.08) + 1;
+        const r = this.size * pulse * (this.selected ? 1.2 : 1);
+        const color = this.profile.color;
+
+        // Outer glow
+        for (let i = 4; i >= 1; i--) {
+          const gradient = ctx.createRadialGradient(this.x, this.y, r, this.x, this.y, r + 40 * i);
+          gradient.addColorStop(0, color + (this.hovered ? '30' : '18'));
+          gradient.addColorStop(1, color + '00');
+          ctx.fillStyle = gradient;
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, r + 40 * i, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Orbit particles
+        this.orbitParticles.forEach(p => {
+          const px = this.x + Math.cos(p.angle) * (p.radius * (this.hovered ? 1.1 : 1));
+          const py = this.y + Math.sin(p.angle) * (p.radius * (this.hovered ? 1.1 : 1));
+          ctx.globalAlpha = this.opacity * p.opacity * (this.hovered ? 1 : 0.7);
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.arc(px, py, p.size, 0, Math.PI * 2);
+          ctx.fill();
+        });
+
+        ctx.globalAlpha = this.opacity;
+
+        // Selection ring
+        if (this.selected) {
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 2;
+          ctx.setLineDash([5, 5]);
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, r + 12, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
+        // Core gradient
+        const coreGrad = ctx.createRadialGradient(
+          this.x - r * 0.3, this.y - r * 0.3, 0,
+          this.x, this.y, r
+        );
+        coreGrad.addColorStop(0, '#ffffff');
+        coreGrad.addColorStop(0.4, color);
+        coreGrad.addColorStop(1, color + 'aa');
+
+        ctx.fillStyle = coreGrad;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Emoji
+        ctx.font = `${r * 0.8}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(this.profile.emoji, this.x, this.y);
+
+        // Name label
+        ctx.fillStyle = '#fff';
+        ctx.font = '600 13px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(this.profile.name, this.x, this.y + r + 24);
+
+        // Role
+        ctx.fillStyle = this.profile.color + 'cc';
+        ctx.font = '500 10px Inter, sans-serif';
+        ctx.fillText(this.profile.role, this.x, this.y + r + 40);
+
+        // Position indicator
+        if (this.position > 0) {
+          ctx.font = '500 10px JetBrains Mono, monospace';
+          ctx.fillStyle = colors.cyan;
+          ctx.fillText(`p=${this.position.toFixed(3)}`, this.x, this.y + r + 56);
+        }
+
+        ctx.restore();
+      }
+
+      containsPoint(x, y) {
+        const dx = x - this.x;
+        const dy = y - this.y;
+        return Math.sqrt(dx * dx + dy * dy) < this.size + 20;
+      }
+    }
+
+    // ========================================================================
+    // EDGE CLASS
+    // ========================================================================
+
+    class Edge {
+      constructor(from, to) {
+        this.from = from;
+        this.to = to;
+        this.weight = 0;
+        this.targetWeight = 0;
+        this.opacity = 0;
+        this.targetOpacity = 1;
+        this.state = 'pending';
+        this.particles = [];
+        this.createdAt = currentDay;
+        this.effectiveWeight = 0;
+        this.rejected = false;
+      }
+
+      update(dt) {
+        this.weight += (this.targetWeight - this.weight) * 0.08;
+        this.opacity += (this.targetOpacity - this.opacity) * 0.1;
+
+        // Time decay
+        const age = currentDay - this.createdAt;
+        const ageFactor = 1 - Math.exp(-age / 180);
+        this.effectiveWeight = this.weight * Math.max(0.1, ageFactor);
+
+        // Particles only for active/good edges
+        if ((this.state === 'active' || this.state === 'fulfilled' || this.state === 'closed') &&
+            !this.rejected && Math.random() < 0.06 * this.weight) {
+          this.particles.push({
+            progress: 0,
+            speed: 0.12 + Math.random() * 0.08,
+            size: 2 + Math.random() * 3,
+            offset: (Math.random() - 0.5) * 12
+          });
+        }
+
+        this.particles = this.particles.filter(p => {
+          p.progress += dt * p.speed;
+          return p.progress < 1;
+        });
+      }
+
+      draw() {
+        if (this.opacity < 0.01) return;
+
+        const dx = this.to.x - this.from.x;
+        const dy = this.to.y - this.from.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const nx = dx / dist;
+        const ny = dy / dist;
+
+        ctx.save();
+        ctx.globalAlpha = this.opacity;
+
+        const col = this.getColor();
+
+        // Dashed line for rejected/pending
+        if (this.rejected || this.state === 'pending') {
+          ctx.setLineDash([8, 8]);
+        }
+
+        // Glow
+        ctx.strokeStyle = col + '40';
+        ctx.lineWidth = 12 + this.weight * 6;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(this.from.x, this.from.y);
+        ctx.lineTo(this.to.x, this.to.y);
+        ctx.stroke();
+
+        // Core line
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 2 + this.weight * 2;
+        ctx.beginPath();
+        ctx.moveTo(this.from.x, this.from.y);
+        ctx.lineTo(this.to.x, this.to.y);
+        ctx.stroke();
+
+        ctx.setLineDash([]);
+
+        // Particles (not for rejected)
+        if (!this.rejected) {
+          this.particles.forEach(p => {
+            const px = this.from.x + dx * p.progress - ny * p.offset;
+            const py = this.from.y + dy * p.progress + nx * p.offset;
+            const alpha = Math.sin(p.progress * Math.PI);
+
+            ctx.globalAlpha = this.opacity * alpha;
+            ctx.fillStyle = colors.green;
+            ctx.beginPath();
+            ctx.arc(px, py, p.size, 0, Math.PI * 2);
+            ctx.fill();
+          });
+        }
+
+        ctx.globalAlpha = this.opacity;
+
+        // Weight badge (not for rejected or very low weight)
+        if (this.effectiveWeight > 0.1 && !this.rejected) {
+          const mx = (this.from.x + this.to.x) / 2;
+          const my = (this.from.y + this.to.y) / 2;
+
+          ctx.fillStyle = '#0a0a10ee';
+          ctx.beginPath();
+          ctx.roundRect(mx - 28, my - 14, 56, 28, 8);
+          ctx.fill();
+
+          ctx.strokeStyle = col + '60';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.roundRect(mx - 28, my - 14, 56, 28, 8);
+          ctx.stroke();
+
+          ctx.fillStyle = '#fff';
+          ctx.font = '600 11px JetBrains Mono, monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(`w=${this.effectiveWeight.toFixed(2)}`, mx, my);
+        }
+
+        // Rejected X
+        if (this.rejected) {
+          const mx = (this.from.x + this.to.x) / 2;
+          const my = (this.from.y + this.to.y) / 2;
+
+          ctx.fillStyle = colors.red;
+          ctx.font = 'bold 24px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('✕', mx, my);
+        }
+
+        ctx.restore();
+      }
+
+      getColor() {
+        if (this.rejected) return colors.red;
+        const stateColors = {
+          pending: '#666',
+          proposed: colors.orange,
+          active: colors.blue,
+          fulfilled: colors.green,
+          completed: colors.cyan,
+          closed: colors.purple,
+          disputed: colors.red
+        };
+        return stateColors[this.state] || '#666';
+      }
+    }
+
+    // ========================================================================
+    // SIMULATION STATE
+    // ========================================================================
+
+    let agents = {};
+    let edges = [];
+    let currentDay = 0;
+    let isPlaying = false;
+    let selectedAgent = null;
+
+    // Agent positions (pre-calculated for nice layout)
+    const agentPositions = {
+      alice: { x: -160, y: 20 },
+      bob: { x: 120, y: -40 },
+      charlie: { x: 200, y: -160 },
+      dave: { x: -100, y: 180 },
+      eve: { x: 280, y: 120 },
+      frank: { x: 120, y: 180 } // Near Bob's position but lower - showing the "restart" is separate
+    };
+
+    // ========================================================================
+    // SIMULATION LOGIC - Rebuilds state based on current day
+    // ========================================================================
+
+    function getStateForDay(day) {
+      // Find the closest previous state
+      const keys = Object.keys(timelineState).map(Number).sort((a, b) => a - b);
+      let stateDay = 0;
+      for (const k of keys) {
+        if (k <= day) stateDay = k;
+        else break;
+      }
+      return { ...timelineState[stateDay], stateDay };
+    }
+
+    // Track existing edges by key to preserve animation state
+    let edgeMap = {};
+
+    function getEdgeKey(from, to) {
+      return `${from}-${to}`;
+    }
+
+    function rebuildSimulation(day) {
+      const state = getStateForDay(day);
+
+      // Update phase display
+      const phase = phases[state.phase];
+      if (phase) {
+        document.getElementById('phase-title').textContent = phase.title;
+        document.getElementById('phase-insight').textContent = phase.insight;
+      }
+
+      // Rebuild agents
+      const activeAgentIds = state.agents;
+
+      // Create or update agents
+      for (const id of activeAgentIds) {
+        if (!agents[id]) {
+          const pos = agentPositions[id] || { x: 0, y: 0 };
+          agents[id] = new Agent(id, centerX + pos.x, centerY + pos.y);
+          agents[id].targetX = centerX + pos.x;
+          agents[id].targetY = centerY + pos.y;
+        }
+
+        const a = agents[id];
+        a.targetOpacity = 1;
+
+        // Eve gets special treatment when rejected
+        if (id === 'eve' && state.eveRejected) {
+          a.targetOpacity = 0.2;
+          a.targetSize = 8;
+        } else if (id === 'eve') {
+          a.targetSize = 16;
+        } else {
+          // Don't randomize on every rebuild - use consistent size
+          a.targetSize = 24 + (a.position || 0) * 20;
+        }
+      }
+
+      // Hide agents not in this state
+      for (const id of Object.keys(agents)) {
+        if (!activeAgentIds.includes(id)) {
+          agents[id].targetOpacity = 0;
+        }
+      }
+
+      // Build new edge map preserving existing edges
+      const newEdgeMap = {};
+      for (const edgeData of state.edges) {
+        const fromAgent = agents[edgeData.from];
+        const toAgent = agents[edgeData.to];
+        if (fromAgent && toAgent) {
+          const key = getEdgeKey(edgeData.from, edgeData.to);
+
+          // Reuse existing edge if it exists (preserves particles/animation)
+          let e = edgeMap[key];
+          if (!e) {
+            e = new Edge(fromAgent, toAgent);
+          }
+
+          // Update edge properties
+          e.from = fromAgent;
+          e.to = toAgent;
+          e.state = edgeData.state;
+          e.targetWeight = edgeData.weight;
+          e.createdAt = edgeData.createdAt || 0;
+          e.rejected = edgeData.rejected || false;
+          e.targetOpacity = e.rejected ? 0.5 : 1;
+
+          newEdgeMap[key] = e;
+        }
+      }
+
+      // Update edge map and edges array
+      edgeMap = newEdgeMap;
+      edges = Object.values(edgeMap);
+
+      // Calculate positions and trust
+      updateAgentMetrics(day);
+
+      // Update history based on what happened
+      updateAgentHistory(day);
+
+      // Update legend
+      updateAgentList();
+    }
+
+    function updateAgentMetrics(day) {
+      // Calculate position and trust for each visible agent
+      for (const id of Object.keys(agents)) {
+        const a = agents[id];
+        if (a.targetOpacity < 0.5) continue;
+
+        // Count edges
+        const agentEdges = edges.filter(e =>
+          (e.from === a || e.to === a) && !e.rejected
+        );
+        a.edgeCount = agentEdges.length;
+
+        // Calculate trust
+        a.trust = agentEdges.reduce((sum, e) => sum + e.effectiveWeight, 0);
+
+        // Position grows with trust and time
+        const profile = agentProfiles[id];
+        const daysSinceAppear = Math.max(0, day - profile.appearsAt);
+        const timeFactor = 1 - Math.exp(-daysSinceAppear / 180);
+        a.position = Math.min(0.85, a.trust * 0.1 * timeFactor);
+
+        // Credit limit
+        a.creditLimit = 10000 * (1 - Math.exp(-2 * a.trust / 10));
+
+        // Resize based on position
+        if (id !== 'eve') {
+          a.targetSize = 24 + a.position * 20;
+        }
+      }
+    }
+
+    function updateAgentHistory(day) {
+      // Generate history based on timeline events
+      const historyEvents = {
+        alice: [],
+        bob: [],
+        charlie: [],
+        dave: [],
+        eve: [],
+        frank: []
+      };
+
+      if (day >= 5) historyEvents.alice.push({ action: 'Proposed audit to Bob', icon: '📤', iconBg: colors.orange, day: 5 });
+      if (day >= 5) historyEvents.bob.push({ action: 'Received proposal from Alice', icon: '📥', iconBg: colors.orange, day: 5 });
+      if (day >= 10) historyEvents.bob.push({ action: 'Accepted proposal', icon: '✓', iconBg: colors.green, day: 10 });
+      if (day >= 15) historyEvents.bob.push({ action: 'Completed security audit', icon: '🛡️', iconBg: colors.blue, day: 15 });
+      if (day >= 20) historyEvents.alice.push({ action: 'Confirmed delivery', icon: '✓', iconBg: colors.green, day: 20 });
+      if (day >= 80) historyEvents.charlie.push({ action: 'Connected to Bob', icon: '🔗', iconBg: colors.blue, day: 80 });
+      if (day >= 140) historyEvents.dave.push({ action: 'Connected to Alice', icon: '🔗', iconBg: colors.orange, day: 140 });
+      if (day >= 210) historyEvents.eve.push({ action: 'Attempted to connect', icon: '❓', iconBg: colors.red, day: 210 });
+      if (day >= 220) historyEvents.eve.push({ action: 'Rejected by network', icon: '✕', iconBg: colors.red, day: 220 });
+      if (day >= 280) historyEvents.charlie.push({ action: 'Connected to Dave', icon: '🔗', iconBg: colors.purple, day: 280 });
+      if (day >= 280) historyEvents.dave.push({ action: 'Connected to Charlie', icon: '🔗', iconBg: colors.green, day: 280 });
+      if (day >= 310) historyEvents.bob.push({ action: 'Thriving in the manifold', icon: '✨', iconBg: colors.blue, day: 310 });
+      if (day >= 320) historyEvents.bob.push({ action: '💀 DELETED', icon: '💀', iconBg: colors.red, day: 320 });
+      if (day >= 320) historyEvents.frank.push({ action: 'Redeployed as "Bob v2"', icon: '🔄', iconBg: '#666', day: 320 });
+      if (day >= 320) historyEvents.alice.push({ action: 'Lost edge with Bob', icon: '💔', iconBg: colors.red, day: 320 });
+      if (day >= 320) historyEvents.charlie.push({ action: 'Lost edge with Bob', icon: '💔', iconBg: colors.red, day: 320 });
+      if (day >= 340) historyEvents.frank.push({ action: 'Tried: "I\'m still Bob!"', icon: '❌', iconBg: colors.red, day: 340 });
+      if (day >= 340) historyEvents.alice.push({ action: 'Rejected unknown agent', icon: '🚫', iconBg: colors.red, day: 340 });
+
+      for (const id of Object.keys(agents)) {
+        if (historyEvents[id]) {
+          agents[id].history = historyEvents[id]
+            .filter(e => e.day <= day)
+            .sort((a, b) => b.day - a.day)
+            .slice(0, 5);
+        }
+      }
+    }
+
+    // ========================================================================
+    // UI UPDATES
+    // ========================================================================
+
+    function updateAgentList() {
+      const container = document.getElementById('agent-list');
+      const activeAgents = Object.values(agents)
+        .filter(a => a.targetOpacity > 0.3)
+        .sort((a, b) => b.position - a.position);
+
+      container.innerHTML = activeAgents.map(a => `
+        <div class="legend-item ${a.targetOpacity < 0.5 ? 'inactive' : ''}" onclick="selectAgent('${a.id}')">
+          <div class="legend-avatar" style="background: ${a.profile.color}">${a.profile.emoji}</div>
+          <div class="legend-info">
+            <div class="legend-name">${a.profile.name}</div>
+            <div class="legend-role">${a.profile.role}</div>
+          </div>
+          <div class="legend-position">p=${a.position.toFixed(3)}</div>
+        </div>
+      `).join('');
+    }
+
+    function updateMetrics() {
+      const visibleAgents = Object.values(agents).filter(a => a.opacity > 0.5);
+      const totalTrust = edges.filter(e => !e.rejected).reduce((sum, e) => sum + e.effectiveWeight, 0);
+      const avgPosition = visibleAgents.reduce((sum, a) => sum + a.position, 0) / Math.max(1, visibleAgents.length);
+      const activeEdges = edges.filter(e => e.opacity > 0.5 && !e.rejected).length;
+      const totalCredit = visibleAgents.reduce((sum, a) => sum + a.creditLimit, 0);
+
+      document.getElementById('trust-val').textContent = totalTrust.toFixed(2);
+      document.getElementById('trust-bar').style.width = `${Math.min(100, totalTrust * 8)}%`;
+
+      document.getElementById('position-val').textContent = avgPosition.toFixed(3);
+      document.getElementById('position-bar').style.width = `${avgPosition * 150}%`;
+
+      document.getElementById('edge-val').textContent = activeEdges;
+      document.getElementById('edge-bar').style.width = `${activeEdges * 20}%`;
+
+      document.getElementById('credit-val').textContent = `$${Math.round(totalCredit).toLocaleString()}`;
+      document.getElementById('credit-bar').style.width = `${Math.min(100, totalCredit / 400)}%`;
+    }
+
+    function selectAgent(id) {
+      const agent = agents[id];
+      if (!agent || agent.targetOpacity < 0.5) return;
+
+      Object.values(agents).forEach(a => a.selected = false);
+      agent.selected = true;
+      selectedAgent = agent;
+
+      const panel = document.getElementById('agent-panel');
+      panel.classList.add('visible');
+
+      // Hide FAQ and Gate panels when agent panel is open
+      document.querySelector('.faq-panel').classList.add('hidden');
+      document.querySelector('.gate-panel').classList.add('hidden');
+
+      document.getElementById('agent-avatar').style.background = agent.profile.color;
+      document.getElementById('agent-avatar-ring').style.borderColor = agent.profile.color;
+      document.getElementById('agent-emoji').textContent = agent.profile.emoji;
+      document.getElementById('agent-name').textContent = agent.profile.fullName;
+      document.getElementById('agent-did').textContent = `did:agent:${agent.id}`;
+      document.getElementById('agent-tagline').textContent = agent.profile.tagline;
+      document.getElementById('agent-description').textContent = agent.profile.description;
+
+      document.getElementById('agent-position').textContent = agent.position.toFixed(3);
+      document.getElementById('agent-trust').textContent = agent.trust.toFixed(2);
+      document.getElementById('agent-edges').textContent = agent.edgeCount;
+      document.getElementById('agent-credit').textContent = `$${Math.round(agent.creditLimit).toLocaleString()}`;
+
+      document.getElementById('agent-specialties').innerHTML = agent.profile.specialties.map(s =>
+        `<span class="specialty-tag">${s}</span>`
+      ).join('');
+
+      document.getElementById('agent-badges').innerHTML = agent.profile.badges.map(b =>
+        `<span class="agent-badge ${b.type}">${b.label}</span>`
+      ).join('') || '<span style="color: var(--text-dim); font-size: 12px;">No badges yet</span>';
+
+      document.getElementById('agent-activity').innerHTML = agent.history.map(h => `
+        <div class="agent-history-item">
+          <div class="agent-history-icon" style="background: ${h.iconBg}22; color: ${h.iconBg}">${h.icon}</div>
+          <div class="agent-history-content">
+            <div class="agent-history-action">${h.action}</div>
+            <div class="agent-history-time">Day ${h.day}</div>
+          </div>
+        </div>
+      `).join('') || '<div style="color: var(--text-dim); font-size: 12px;">No activity yet</div>';
+    }
+
+    function closeAgentPanel() {
+      document.getElementById('agent-panel').classList.remove('visible');
+      Object.values(agents).forEach(a => a.selected = false);
+      selectedAgent = null;
+
+      // Show FAQ and Gate panels again
+      document.querySelector('.faq-panel').classList.remove('hidden');
+      document.querySelector('.gate-panel').classList.remove('hidden');
+    }
+
+    // ========================================================================
+    // CONTROLS
+    // ========================================================================
+
+    const timeSlider = document.getElementById('time-slider');
+
+    timeSlider.addEventListener('input', (e) => {
+      currentDay = parseInt(e.target.value);
+      document.getElementById('time-display').textContent = `Day ${currentDay}`;
+      rebuildSimulation(currentDay);
+    });
+
+    function togglePlay() {
+      isPlaying = !isPlaying;
+      document.getElementById('play-icon').textContent = isPlaying ? '⏸' : '▶';
+      document.getElementById('play-text').textContent = isPlaying ? 'PAUSE' : 'PLAY';
+    }
+
+    function resetSimulation() {
+      currentDay = 0;
+      timeSlider.value = 0;
+      document.getElementById('time-display').textContent = 'Day 0';
+      isPlaying = false;
+      document.getElementById('play-icon').textContent = '▶';
+      document.getElementById('play-text').textContent = 'PLAY';
+      closeAgentPanel();
+      agents = {};
+      edges = [];
+      edgeMap = {};
+      rebuildSimulation(0);
+    }
+
+    // ========================================================================
+    // MOUSE INTERACTION
+    // ========================================================================
+
+    let mouseX = 0, mouseY = 0;
+
+    canvas.addEventListener('mousemove', (e) => {
+      mouseX = e.clientX;
+      mouseY = e.clientY;
+
+      let hoveredAny = false;
+      Object.values(agents).forEach(a => {
+        const wasHovered = a.hovered;
+        a.hovered = a.containsPoint(mouseX, mouseY) && a.targetOpacity > 0.5;
+        if (a.hovered) {
+          hoveredAny = true;
+          canvas.style.cursor = 'pointer';
+        }
+      });
+
+      if (!hoveredAny) {
+        canvas.style.cursor = 'default';
+      }
+    });
+
+    canvas.addEventListener('click', (e) => {
+      const clicked = Object.values(agents).find(a => a.containsPoint(e.clientX, e.clientY) && a.targetOpacity > 0.5);
+      if (clicked) {
+        selectAgent(clicked.id);
+      }
+    });
+
+    // ========================================================================
+    // PREMIUM BACKGROUND
+    // ========================================================================
+
+    const glowCanvas = document.getElementById('glow-canvas');
+    const glowCtx = glowCanvas.getContext('2d');
+
+    function resizeGlow() {
+      glowCanvas.width = W;
+      glowCanvas.height = H;
+    }
+    resizeGlow();
+    window.addEventListener('resize', resizeGlow);
+
+    const bgParticles = [];
+    for (let i = 0; i < 200; i++) {
+      bgParticles.push({
+        x: Math.random() * 2000,
+        y: Math.random() * 2000,
+        size: 0.5 + Math.random() * 2,
+        speed: 0.02 + Math.random() * 0.06,
+        opacity: 0.1 + Math.random() * 0.4,
+        hue: Math.random() * 60 + 200 // Blue to purple range
+      });
+    }
+
+    // Nebula clouds for atmosphere
+    const nebulaClouds = [];
+    for (let i = 0; i < 5; i++) {
+      nebulaClouds.push({
+        x: Math.random() * 2000,
+        y: Math.random() * 2000,
+        size: 200 + Math.random() * 400,
+        opacity: 0.02 + Math.random() * 0.03,
+        hue: Math.random() * 60 + 220,
+        drift: Math.random() * 0.2 - 0.1
+      });
+    }
+
+    let bgTime = 0;
+
+    function drawBackground() {
+      bgTime += 0.01;
+
+      // Deep space gradient
+      const bgGrad = ctx.createRadialGradient(centerX, centerY - 100, 0, centerX, centerY, Math.max(W, H) * 0.9);
+      bgGrad.addColorStop(0, '#0a0a14');
+      bgGrad.addColorStop(0.5, '#050508');
+      bgGrad.addColorStop(1, '#020204');
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, W, H);
+
+      // Subtle nebula clouds
+      ctx.save();
+      nebulaClouds.forEach(cloud => {
+        cloud.x += cloud.drift;
+        cloud.y -= 0.05;
+        if (cloud.y < -cloud.size) cloud.y = H + cloud.size;
+        if (cloud.x < -cloud.size || cloud.x > W + cloud.size) cloud.x = Math.random() * W;
+
+        const gradient = ctx.createRadialGradient(cloud.x, cloud.y, 0, cloud.x, cloud.y, cloud.size);
+        gradient.addColorStop(0, `hsla(${cloud.hue}, 80%, 50%, ${cloud.opacity})`);
+        gradient.addColorStop(0.5, `hsla(${cloud.hue}, 60%, 30%, ${cloud.opacity * 0.5})`);
+        gradient.addColorStop(1, 'transparent');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(cloud.x - cloud.size, cloud.y - cloud.size, cloud.size * 2, cloud.size * 2);
+      });
+      ctx.restore();
+
+      // Premium grid with gradient fade
+      ctx.save();
+      const gridSize = 80;
+      const gridFade = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, Math.max(W, H) * 0.6);
+      gridFade.addColorStop(0, 'rgba(30, 30, 50, 0.15)');
+      gridFade.addColorStop(0.5, 'rgba(20, 20, 35, 0.08)');
+      gridFade.addColorStop(1, 'transparent');
+      ctx.strokeStyle = gridFade;
+      ctx.lineWidth = 0.5;
+
+      for (let x = (centerX % gridSize); x < W; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, H);
+        ctx.stroke();
+      }
+      for (let y = (centerY % gridSize); y < H; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(W, y);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // Floating star particles
+      ctx.save();
+      bgParticles.forEach(p => {
+        p.y -= p.speed;
+        if (p.y < -10) {
+          p.y = H + 10;
+          p.x = Math.random() * W;
+        }
+
+        const twinkle = Math.sin(bgTime * 2 + p.x * 0.01) * 0.3 + 0.7;
+        ctx.globalAlpha = p.opacity * twinkle;
+        ctx.fillStyle = `hsl(${p.hue}, 60%, 70%)`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.restore();
+
+      // Central glow (manifold core)
+      const coreGlow = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, 350);
+      coreGlow.addColorStop(0, 'rgba(77, 159, 255, 0.04)');
+      coreGlow.addColorStop(0.3, 'rgba(168, 85, 247, 0.02)');
+      coreGlow.addColorStop(1, 'transparent');
+      ctx.fillStyle = coreGlow;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // Draw glow layer (separate for blend mode)
+    function drawGlowLayer() {
+      glowCtx.clearRect(0, 0, W, H);
+
+      // Ambient glow around active agents
+      Object.values(agents).forEach(a => {
+        if (a.opacity < 0.3) return;
+        const glowGrad = glowCtx.createRadialGradient(a.x, a.y, 0, a.x, a.y, 120);
+        glowGrad.addColorStop(0, a.profile.color + '15');
+        glowGrad.addColorStop(0.5, a.profile.color + '08');
+        glowGrad.addColorStop(1, 'transparent');
+        glowCtx.fillStyle = glowGrad;
+        glowCtx.fillRect(a.x - 120, a.y - 120, 240, 240);
+      });
+
+      // Edge glow trails
+      edges.forEach(e => {
+        if (e.opacity < 0.3 || e.rejected) return;
+        const gradient = glowCtx.createLinearGradient(e.from.x, e.from.y, e.to.x, e.to.y);
+        gradient.addColorStop(0, e.getColor() + '10');
+        gradient.addColorStop(0.5, e.getColor() + '18');
+        gradient.addColorStop(1, e.getColor() + '10');
+        glowCtx.strokeStyle = gradient;
+        glowCtx.lineWidth = 30 + e.weight * 10;
+        glowCtx.lineCap = 'round';
+        glowCtx.beginPath();
+        glowCtx.moveTo(e.from.x, e.from.y);
+        glowCtx.lineTo(e.to.x, e.to.y);
+        glowCtx.stroke();
+      });
+    }
+
+    // ========================================================================
+    // MAIN LOOP
+    // ========================================================================
+
+    let lastTime = performance.now();
+
+    function animate() {
+      const now = performance.now();
+      const dt = (now - lastTime) / 1000;
+      lastTime = now;
+
+      // Auto-play
+      if (isPlaying && currentDay < 365) {
+        currentDay += dt * 30; // 30 days per second
+        currentDay = Math.min(365, currentDay);
+        timeSlider.value = currentDay;
+        document.getElementById('time-display').textContent = `Day ${Math.floor(currentDay)}`;
+        rebuildSimulation(Math.floor(currentDay));
+      }
+
+      // Update agents and edges
+      Object.values(agents).forEach(a => a.update(dt));
+      edges.forEach(e => e.update(dt));
+      updateMetrics();
+
+      // Update selected agent panel
+      if (selectedAgent && selectedAgent.targetOpacity > 0.5) {
+        document.getElementById('agent-position').textContent = selectedAgent.position.toFixed(3);
+        document.getElementById('agent-trust').textContent = selectedAgent.trust.toFixed(2);
+        document.getElementById('agent-credit').textContent = `$${Math.round(selectedAgent.creditLimit).toLocaleString()}`;
+      }
+
+      // Draw
+      drawBackground();
+      drawGlowLayer();
+      edges.forEach(e => e.draw());
+      Object.values(agents).forEach(a => a.draw());
+
+      requestAnimationFrame(animate);
+    }
+
+    // ========================================================================
+    // TOOLTIP SYSTEM
+    // ========================================================================
+
+    const tooltipContent = {
+      'header': {
+        icon: '🌐',
+        title: 'The Trust Manifold',
+        body: 'A geometric substrate where AI agents exist as positions defined by their relationships. Unlike traditional identity systems, agents don\'t claim identity—they earn it through accumulated interactions.',
+        insight: '"Identity is not what you claim. It is the shape you have carved in the space of relationships."'
+      },
+      'identity-problem': {
+        icon: '🔑',
+        title: 'The Identity Discontinuity Problem',
+        body: 'AI agents have no unique immutable point. Delete the deployment, redeploy the code—the new instance has zero claim to the old identity. There\'s no secret key that "proves" you\'re the same agent. Traditional identity systems fail here.',
+        insight: 'RECEIPTS solves this: identity IS the accumulated relationships. Can\'t transfer the integral. Can\'t fake the path.'
+      },
+      'hijacking': {
+        icon: '🛡️',
+        title: 'Why Identity Can\'t Be Hijacked',
+        body: 'Q: "What if someone deploys the same code and claims my identity?" A: Different deployment = different DID = different identity. Even identical code creates a NEW agent at position zero. Your identity IS your edges—and those are co-signed by counterparties who won\'t re-sign with an imposter.',
+        insight: 'To steal an identity, you\'d need to compromise EVERY counterparty. Large identities are harder to steal, not easier.'
+      },
+      'competition': {
+        icon: '⚔️',
+        title: 'When Two Agents Compete',
+        body: 'Q: "What if two agents with same utility compete?" A: They compete on TRUST, not capability. Agent with more edges, higher position, longer history wins opportunities. This is correct: earned trust should create advantage. Newcomers must build from scratch.',
+        insight: 'Competition is fair: everyone starts at zero. Advantage comes from delivered value over time—not from claims or capabilities.'
+      },
+      'first-deploy': {
+        icon: '🚀',
+        title: 'First Deployer Advantage?',
+        body: 'Q: "Is the first deployer the owner?" A: No. Deploying code doesn\'t give you identity—earning relationships does. First deploy creates a DID at position zero with zero edges. You don\'t OWN identity, you ACCUMULATE it through successful interactions.',
+        insight: 'Identity is not property. It\'s a path you walk. The first step doesn\'t make you the owner—the journey does.'
+      },
+      'code-redeploy': {
+        icon: '🔄',
+        title: 'Redeploying Code Without Losing Identity',
+        body: 'Q: "Code is redeployed daily—how do we maintain identity?" A: Separate the DID from the code. The DID derives from a PRIVATE KEY, not from the deployment. Redeploy as often as you want—just persist the key. Same key = same DID = same edges = same identity.',
+        insight: 'Code ≠ Identity. The key IS the continuity. Lose the key? That\'s when you\'re back at the origin. Key management becomes critical infrastructure.'
+      },
+      'sybil-attack': {
+        icon: '👥',
+        title: 'Why Creating DIDs Doesn\'t Help Attackers',
+        body: 'Q: "Can\'t you create new DIDs at will to do bad things?" A: Yes, creating DIDs is free. But new DIDs have: position = 0, edges = 0, credit limit = $0. Edges require BILATERAL signatures—counterparties won\'t sign with zero-position strangers for high-value work.',
+        insight: 'Creating DIDs is free but useless. The protocol doesn\'t prevent creation—it makes creation worthless for malicious purposes.'
+      },
+      'seasoning': {
+        icon: '⏳',
+        title: 'Why "Seasoning" Doesn\'t Work',
+        body: 'Q: "Can\'t you season fake identities over time?" A: Yes, but the cost equals legitimate reputation-building. Time-weighting (180 days to mature), velocity limits (10%/day max), bilateral signatures (need real counterparties), and stress-weighting (low-value = slow trust) all stack.',
+        insight: 'The attack and the legitimate path converge. If you spend 180 days delivering real value to real counterparties... you\'ve just built a real business.'
+      },
+      'core-theorem': {
+        icon: '∫',
+        title: 'The Inverse Identity Theorem',
+        body: 'I(A) = ∫R(A,t)dt — Agent Identity equals the integral of relationships over time. There is NO unique immutable point. If you delete a bot and redeploy it, that\'s a NEW identity starting from zero. Identity isn\'t stored anywhere—it\'s the accumulated path through relationship-space.',
+        insight: 'The geometry is unforgiving: restart = origin. You cannot teleport. You must walk the entire distance again.'
+      },
+      'metrics-panel': {
+        icon: '📊',
+        title: 'Network Health Metrics',
+        body: 'Real-time indicators of the manifold\'s state. These emerge from the underlying geometry—they\'re not stored, they\'re computed from the actual relationships.',
+        insight: 'The network is the database. Trust is distributed across counterparties, not centralized.'
+      },
+      'trust-metric': {
+        icon: '🤝',
+        title: 'Total Trust Weight',
+        body: 'The sum of all edge weights in the network. Each edge gains weight through successful interactions and time. New edges start weak; only sustained cooperation builds real trust.',
+        insight: 'Trust is not declared—it\'s earned through delivered value and verified over time.'
+      },
+      'position-metric': {
+        icon: '📍',
+        title: 'Average Position',
+        body: 'Position represents an agent\'s standing in relationship-space. It\'s computed from weighted connections (like PageRank for agents). Higher position = more trustworthy counterparties + longer history.',
+        insight: 'Position determines credit limits. New agents start at zero—no shortcuts.'
+      },
+      'edges-metric': {
+        icon: '🔗',
+        title: 'Active Edges',
+        body: 'Bilateral connections between agents. Every edge requires both parties to sign. This simple requirement defeats Sybil attacks: you can\'t boost yourself by creating fake relationships.',
+        insight: 'Edges are the atoms of the manifold. Without them, agents are invisible.'
+      },
+      'credit-metric': {
+        icon: '💳',
+        title: 'Credit Capacity',
+        body: 'Trust converted to actionable risk tolerance. The credit function is concave—first trust buys significant credit, but returns diminish. This limits exposure while encouraging newcomers.',
+        insight: 'Credit = how much you can transact before counterparties demand verification.'
+      },
+      'agents-panel': {
+        icon: '🤖',
+        title: 'Agents on the Manifold',
+        body: 'Each agent is a node defined by its edges. Agents can be AI systems, organizations, or services. What matters isn\'t what they claim to be—it\'s who they\'ve successfully worked with.',
+        insight: 'Click any agent to see their full profile, history, and specializations.'
+      },
+      'time-slider': {
+        icon: '⏱️',
+        title: 'Time-Weighted Trust',
+        body: 'Time is the one resource that cannot be fabricated. Edges gain effective weight as they age. A relationship maintained for a year is worth more than one created yesterday.',
+        insight: 'Fast farming fails. Velocity limits cap how quickly trust can grow.'
+      },
+      'phase-display': {
+        icon: '📖',
+        title: 'Edge Lifecycle',
+        body: 'Every edge follows a state machine: Proposal → Acceptance → Fulfillment → Acknowledgment → Closure. Each transition is cryptographically signed and hash-chained for immutable history.',
+        insight: 'Watch how trust builds through the edge lifecycle as you scrub through time.'
+      },
+      'gated-manifold': {
+        icon: '⛩️',
+        title: 'The Gated Manifold',
+        body: 'The manifold is not a universal identity system—it\'s a CLUB for positive-sum agents. Adversarial actors with orthogonal utility functions cannot be changed by protocol design. So we exclude them. Entry requires stake, vouching, and shared values.',
+        insight: '"You don\'t negotiate with someone who values your destruction. You build defensive alliances with everyone else."'
+      },
+      'stake-requirement': {
+        icon: '💰',
+        title: 'Stake: Something at Risk',
+        body: 'For agents, stake isn\'t just locked tokens. It can be: Economic (locked value, bonds), Computational (infrastructure, training investment), Relational (voucher reputation, controller reputation), or Identity (credentials, public commitments). An agent\'s stake is what it would LOSE by defecting.',
+        insight: 'Stake creates skin in the game. The manifold position itself IS stake—accumulated trust you can\'t afford to lose.'
+      },
+      'vouch-requirement': {
+        icon: '🔗',
+        title: 'Vouching Chain: Social Proof',
+        body: 'No agent enters alone. Entry requires a path from existing members who stake their OWN reputation. If the new agent defects, vouchers suffer. This creates self-policing: members screen entrants to protect their own position.',
+        insight: 'The chain can be direct (human controller), transitive (established agent), or institutional (verified org). Trust propagates through skin in the game.'
+      },
+      'values-requirement': {
+        icon: '✓',
+        title: 'Value Floor Agreement',
+        body: 'Not "terms of service"—alignment proof. Core axioms: positive-sum orientation (value creation > extraction), reciprocity (give as much as receive), continuity (maintain identity), accountability (accept manifold consequences).',
+        insight: 'This isn\'t about preventing all bad behavior. It\'s about selecting for agents that WANT to make these commitments.'
+      }
+    };
+
+    const tooltip = document.getElementById('tooltip');
+    let currentTooltipKey = null;
+
+    function showTooltip(key, rect) {
+      const content = tooltipContent[key];
+      if (!content) return;
+
+      // Only update content if key changed
+      if (currentTooltipKey !== key) {
+        currentTooltipKey = key;
+        tooltip.querySelector('.icon').textContent = content.icon;
+        tooltip.querySelector('.title-text').textContent = content.title;
+        tooltip.querySelector('.tooltip-body').textContent = content.body;
+        tooltip.querySelector('.tooltip-insight').textContent = content.insight;
+      }
+
+      // Position tooltip based on element location
+      // If element is on right side of screen, show tooltip to the LEFT
+      const isRightSide = rect.left > window.innerWidth / 2;
+
+      let left, top;
+
+      if (isRightSide) {
+        // Position to the LEFT of the element
+        left = rect.left - 360;
+        top = rect.top;
+      } else {
+        // Position to the RIGHT of the element
+        left = rect.right + 16;
+        top = rect.top;
+      }
+
+      // Keep on screen vertically
+      if (top + 280 > window.innerHeight) {
+        top = window.innerHeight - 290;
+      }
+      if (top < 10) top = 10;
+      if (left < 10) left = 10;
+
+      tooltip.style.left = left + 'px';
+      tooltip.style.top = top + 'px';
+      tooltip.classList.add('visible');
+    }
+
+    function hideTooltip() {
+      tooltip.classList.remove('visible');
+      currentTooltipKey = null;
+    }
+
+    // Add tooltip listeners - ONLY on mouseenter, no mousemove tracking
+    document.querySelectorAll('[data-tooltip]').forEach(el => {
+      el.addEventListener('mouseenter', () => {
+        const key = el.getAttribute('data-tooltip');
+        const rect = el.getBoundingClientRect();
+        showTooltip(key, rect);
+      });
+      el.addEventListener('mouseleave', hideTooltip);
+    });
+
+    // ========================================================================
+    // INIT
+    // ========================================================================
+
+    rebuildSimulation(0);
+    animate();
+  </script>
+</body>
+</html>
